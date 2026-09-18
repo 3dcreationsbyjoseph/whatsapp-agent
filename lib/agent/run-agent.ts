@@ -9,6 +9,7 @@ import { makeGetAvailableSlotsTool } from "./tools/get-available-slots";
 import { makeBookAppointmentTool } from "./tools/book-appointment";
 import { makeSaveContactInfoTool } from "./tools/save-contact-info";
 import { makeHandoffTool } from "./tools/request-human-handoff";
+import { makeCheckSlotAvailabilityTool } from "./tools/check-slot-availability";
 import type { GCalConfig } from "@/lib/google/calendar";
 
 export type AgentInput = {
@@ -33,6 +34,12 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
 
   const tools = {
     get_available_slots: makeGetAvailableSlotsTool({
+      gcal: input.gcal_config,
+      timezone: input.timezone,
+      services,
+      business_hours: businessHours,
+    }),
+    check_slot_availability: makeCheckSlotAvailabilityTool({
       gcal: input.gcal_config,
       timezone: input.timezone,
       services,
