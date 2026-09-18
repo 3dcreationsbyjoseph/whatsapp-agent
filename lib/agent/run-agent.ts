@@ -8,8 +8,9 @@ import { buildSystemPrompt, type AgentConfig } from "./system-prompt";
 import { makeGetAvailableSlotsTool } from "./tools/get-available-slots";
 import { makeBookAppointmentTool } from "./tools/book-appointment";
 import { makeSaveContactInfoTool } from "./tools/save-contact-info";
-import { makeHandoffTool } from "./tools/request-human-handoff";
 import { makeCheckSlotAvailabilityTool } from "./tools/check-slot-availability";
+import { makeListUpcomingAppointmentsTool } from "./tools/list-upcoming-appointments";
+import { makeCancelAppointmentTool } from "./tools/cancel-appointment";
 import type { GCalConfig } from "@/lib/google/calendar";
 
 export type AgentInput = {
@@ -57,10 +58,14 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       contact_id: input.contact_id,
       organization_id: input.organization_id,
     }),
-    request_human_handoff: makeHandoffTool({
-      conversation_id: input.conversation_id,
+    list_upcoming_appointments: makeListUpcomingAppointmentsTool({
       organization_id: input.organization_id,
-      handoff_message: input.agent_config.handoff_message ?? "Te paso con un humano en un momento.",
+      contact_id: input.contact_id,
+    }),
+    cancel_appointment: makeCancelAppointmentTool({
+      organization_id: input.organization_id,
+      contact_id: input.contact_id,
+      gcal: input.gcal_config,
     }),
   };
 
