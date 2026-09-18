@@ -23,26 +23,15 @@ export async function GET(req: Request) {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // Formato del verify_token: "{org_slug}:{secret}"
-  const [slug, secret] = token.split(":");
-  if (!slug || !secret) return new Response("Forbidden", { status: 403 });
-
+  // El verify_token en BD es la cadena completa (formato "{org_slug}:{secret}"),
+  // y el multi-tenancy sale automáticamente de que la cadena entera sea única.
   const admin = createAdminClient();
-  const { data: org } = await admin
-    .from("organizations")
-    .select("id")
-    .eq("slug", slug)
-    .single();
-  if (!org) return new Response("Forbidden", { status: 403 });
-
   const { data: cfg } = await admin
     .from("whatsapp_configs")
-    .select("verify_token")
-    .eq("organization_id", org.id)
-    .single();
-  if (!cfg || cfg.verify_token !== secret) {
-    return new Response("Forbidden", { status: 403 });
-  }
+    .select("organization_id")
+    .eq("verify_token", token)
+    .maybeSingle();
+  if (!cfg) return new Response("Forbidden", { status: 403 });
 
   return new Response(challenge, { status: 200 });
 }
