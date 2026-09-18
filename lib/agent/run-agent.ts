@@ -66,5 +66,37 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     tools,
   });
 
+  // Log de tools llamadas y sus resultados para debugging.
+  try {
+    const toolCalls: Array<{ name: string; input: unknown; output: unknown }> = [];
+    for (const step of result.steps ?? []) {
+      for (const call of step.toolCalls ?? []) {
+        const match = (step.toolResults ?? []).find(
+          (r: { toolCallId: string }) => r.toolCallId === call.toolCallId,
+        );
+        toolCalls.push({
+          name: call.toolName,
+          input: call.input,
+          output: (match as { output?: unknown } | undefined)?.output,
+        });
+      }
+    }
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "agent step trace",
+        organization_id: input.organization_id,
+        conversation_id: input.conversation_id,
+        steps: result.steps?.length ?? 0,
+        tool_calls: toolCalls,
+        text_length: result.text?.length ?? 0,
+      }),
+    );
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: "warn", msg: "trace log failed", err: (err as Error).message }),
+    );
+  }
+
   return { text: result.text };
 }
