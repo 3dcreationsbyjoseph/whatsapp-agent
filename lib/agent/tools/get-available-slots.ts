@@ -75,8 +75,14 @@ export function makeGetAvailableSlotsTool(ctx: {
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio (debe existir en la lista de servicios)"),
       days_ahead: z.number().int().min(1).max(30).default(7),
+      on_date: z
+        .string()
+        .optional()
+        .describe(
+          "Opcional. Fecha en YYYY-MM-DD (zona horaria del negocio) para filtrar slots SOLO de ese día. Úsalo cuando el cliente pida un día concreto (ej. 'mañana', 'lunes').",
+        ),
     }),
-    execute: async ({ service, days_ahead }) => {
+    execute: async ({ service, days_ahead, on_date }) => {
       const svc = ctx.services.find((s) => s.name.toLowerCase() === service.toLowerCase());
       if (!svc) {
         return {
@@ -113,6 +119,12 @@ export function makeGetAvailableSlotsTool(ctx: {
           const [eh, em] = range.end.split(":").map(Number);
           const dayStart = localWallTimeToUtc(dayLocal.y, dayLocal.m, dayLocal.d, sh, sm, ctx.timezone);
           const dayEnd = localWallTimeToUtc(dayLocal.y, dayLocal.m, dayLocal.d, eh, em, ctx.timezone);
+
+          // Filtro por día concreto si el agente pasó on_date
+          if (on_date) {
+            const localDayStr = `${dayLocal.y.toString().padStart(4, "0")}-${dayLocal.m.toString().padStart(2, "0")}-${dayLocal.d.toString().padStart(2, "0")}`;
+            if (localDayStr !== on_date) continue;
+          }
 
           for (let t = dayStart.getTime(); t + durationMs <= dayEnd.getTime(); t += 30 * 60_000) {
             const slotStart = new Date(t);
