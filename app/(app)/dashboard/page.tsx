@@ -16,6 +16,13 @@ export default async function DashboardPage() {
   if (!profile) return null;
   const orgId = profile.organization_id;
 
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("timezone")
+    .eq("id", orgId)
+    .single();
+  const tz = org?.timezone ?? "Europe/Madrid";
+
   const now = new Date();
   const since30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -68,7 +75,7 @@ export default async function DashboardPage() {
                 <Link href={`/conversaciones/${c.id}`} className="block px-4 py-3 hover:bg-neutral-900">
                   <div className="text-sm font-medium">{contact?.full_name ?? contact?.wa_phone ?? "Sin nombre"}</div>
                   <div className="text-xs text-neutral-500">
-                    {new Date(c.last_message_at).toLocaleString("es-MX")}
+                    {new Date(c.last_message_at).toLocaleString("es-ES", { timeZone: tz })}
                   </div>
                 </Link>
               </li>

@@ -50,13 +50,35 @@ export async function getFreeBusy(config: GCalConfig, timeMin: string, timeMax: 
   return data.calendars?.[config.calendar_id]?.busy ?? [];
 }
 
+// Convierte un timestamp UTC a la representación wall-clock (sin Z) en la
+// zona horaria dada. Google Calendar interpreta ese wall-clock literal como
+// hora local del timeZone que le pasamos, así el evento se muestra igual
+// para todo viewer sin depender del calendario destino.
+function toLocalWallClockIso(isoUtc: string, timezone: string): string {
+  const d = new Date(isoUtc);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const h = p.hour === "24" ? "00" : p.hour;
+  return `${p.year}-${p.month}-${p.day}T${h}:${p.minute}:${p.second}`;
+}
+
 export async function createEvent(
   config: GCalConfig,
   args: {
     summary: string;
     description?: string;
-    start: string; // ISO
-    end: string; // ISO
+    start: string; // ISO UTC
+    end: string; // ISO UTC
     timezone: string;
     attendee_phone?: string;
   },
@@ -67,8 +89,14 @@ export async function createEvent(
     requestBody: {
       summary: args.summary,
       description: args.description,
-      start: { dateTime: args.start, timeZone: args.timezone },
-      end: { dateTime: args.end, timeZone: args.timezone },
+      start: {
+        dateTime: toLocalWallClockIso(args.start, args.timezone),
+        timeZone: args.timezone,
+      },
+      end: {
+        dateTime: toLocalWallClockIso(args.end, args.timezone),
+        timeZone: args.timezone,
+      },
       extendedProperties: args.attendee_phone
         ? { private: { whatsapp_phone: args.attendee_phone } }
         : undefined,

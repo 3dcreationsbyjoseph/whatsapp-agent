@@ -7,6 +7,13 @@ export default async function CitasPage() {
   const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single();
   if (!profile) return null;
 
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("timezone")
+    .eq("id", profile.organization_id)
+    .single();
+  const tz = org?.timezone ?? "Europe/Madrid";
+
   const now = new Date();
   const inTwoMonths = new Date(now);
   inTwoMonths.setMonth(inTwoMonths.getMonth() + 2);
@@ -20,7 +27,7 @@ export default async function CitasPage() {
     .lt("starts_at", inTwoMonths.toISOString())
     .order("starts_at", { ascending: true });
 
-  const grouped = groupByDay(appts ?? []);
+  const grouped = groupByDay(appts ?? [], tz);
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -36,7 +43,7 @@ export default async function CitasPage() {
                 <li key={a.id} className="px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium">
-                      {new Date(a.starts_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })} · {a.service}
+                      {new Date(a.starts_at).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: tz })} · {a.service}
                     </div>
                     <div className="text-xs text-neutral-500">
                       {a.full_name} · {a.phone}
@@ -65,14 +72,15 @@ export default async function CitasPage() {
   );
 }
 
-function groupByDay<T extends { starts_at: string }>(items: T[]): Array<[string, T[]]> {
+function groupByDay<T extends { starts_at: string }>(items: T[], timeZone: string): Array<[string, T[]]> {
   const groups = new Map<string, T[]>();
   for (const item of items) {
-    const day = new Date(item.starts_at).toLocaleDateString("es-MX", {
+    const day = new Date(item.starts_at).toLocaleDateString("es-ES", {
       weekday: "long",
       day: "numeric",
       month: "long",
       year: "numeric",
+      timeZone,
     });
     const arr = groups.get(day) ?? [];
     arr.push(item);
