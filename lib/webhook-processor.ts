@@ -122,15 +122,18 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .maybeSingle();
           const gcal: GCalConfig | null = gcalRow ?? null;
 
+          // Últimos 20 mensajes en orden ascendente (evita que un historial largo
+          // confunda al modelo con contexto viejo tras completar acciones).
           const { data: history } = await admin
             .from("messages")
-            .select("direction, sender, content")
+            .select("direction, sender, content, created_at")
             .eq("conversation_id", conv.id)
-            .order("created_at", { ascending: true })
-            .limit(30);
+            .order("created_at", { ascending: false })
+            .limit(20);
 
           const chat_history = (history ?? [])
             .filter((h) => h.content)
+            .reverse()
             .map((h) => ({
               role: h.direction === "inbound" ? ("user" as const) : ("assistant" as const),
               content: h.content!,

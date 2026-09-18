@@ -7,7 +7,7 @@ export const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}` 
 
 export const ANTHROPIC_MODEL = "claude-sonnet-4-6" as const;
 
-export const AGENT_MAX_STEPS = 8 as const;
+export const AGENT_MAX_STEPS = 12 as const;
 export const AGENT_TEMPERATURE = 0.3 as const;
 
 // Rutas protegidas (usadas por middleware.ts)
