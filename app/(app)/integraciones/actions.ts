@@ -31,29 +31,40 @@ export async function saveWhatsAppConfig(formData: FormData) {
     redirect("/integraciones?err=" + encodeURIComponent("Faltan campos obligatorios"));
   }
 
-  const patch: Record<string, string> = {
-    organization_id: orgId!,
-    phone_number_id,
-    waba_id,
-    verify_token,
-  };
-  if (access_token) patch.access_token_encrypted = encrypt(access_token);
-  if (app_secret) patch.app_secret_encrypted = encrypt(app_secret);
-
-  // Verifica que si es una inserción nueva, se hayan enviado los cifrados.
+  // Comprobar si ya existe la config para decidir insert vs update parcial.
   const { data: existing } = await supabase
     .from("whatsapp_configs")
     .select("organization_id")
     .eq("organization_id", orgId!)
     .maybeSingle();
 
-  if (!existing && (!access_token || !app_secret)) {
-    redirect("/integraciones?err=" + encodeURIComponent("Access Token y App Secret son obligatorios en la primera configuración"));
+  let error;
+  if (existing) {
+    // Update parcial: sólo actualiza los campos cifrados si el usuario los envió.
+    const update: Record<string, string> = { phone_number_id, waba_id, verify_token };
+    if (access_token) update.access_token_encrypted = encrypt(access_token);
+    if (app_secret) update.app_secret_encrypted = encrypt(app_secret);
+    ({ error } = await supabase
+      .from("whatsapp_configs")
+      .update(update as never)
+      .eq("organization_id", orgId!));
+  } else {
+    // Insert nuevo: los cifrados son obligatorios.
+    if (!access_token || !app_secret) {
+      redirect(
+        "/integraciones?err=" +
+          encodeURIComponent("Access Token y App Secret son obligatorios en la primera configuración"),
+      );
+    }
+    ({ error } = await supabase.from("whatsapp_configs").insert({
+      organization_id: orgId!,
+      phone_number_id,
+      waba_id,
+      verify_token,
+      access_token_encrypted: encrypt(access_token),
+      app_secret_encrypted: encrypt(app_secret),
+    } as never));
   }
-
-  const { error } = await supabase
-    .from("whatsapp_configs")
-    .upsert(patch as never, { onConflict: "organization_id" });
 
   if (error) {
     redirect("/integraciones?err=" + encodeURIComponent(error.message));
