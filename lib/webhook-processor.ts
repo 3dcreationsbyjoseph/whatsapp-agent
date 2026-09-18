@@ -163,6 +163,20 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
 
           if (reply) {
             const send = await sendWhatsAppText(wa.phone_number_id, accessToken, m.from, reply);
+            if (!send.ok) {
+              // Meta rechazó el envío (401/token, plantilla requerida fuera de la ventana, etc.).
+              // No guardamos el mensaje como si hubiera llegado — logueamos y salimos.
+              console.error(
+                JSON.stringify({
+                  level: "error",
+                  msg: "outbound send failed",
+                  organization_id,
+                  wa_message_id: m.id,
+                  err: send.error,
+                }),
+              );
+              return;
+            }
             await admin.from("messages").insert({
               conversation_id: conv.id,
               organization_id,
