@@ -12,7 +12,7 @@ create table if not exists public.organizations (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
   slug        text unique not null,
-  timezone    text not null default 'America/Mexico_City',
+  timezone    text not null default 'Europe/Madrid',
   created_at  timestamptz not null default now()
 );
 
