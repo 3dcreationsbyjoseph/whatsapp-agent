@@ -5,6 +5,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppImage } from "@/lib/whatsapp/send";
+import { resolveCurrentPropertyId } from "../resolve-current-property";
 
 export function makeSendMorePropertyPhotosTool(ctx: {
   organization_id: string;
@@ -17,7 +18,10 @@ export function makeSendMorePropertyPhotosTool(ctx: {
     description:
       "Envía las siguientes fotos de una propiedad al cliente por WhatsApp. Llámala SIEMPRE cuando el cliente pida más fotos, otras fotos, 'envíame X más' o expresiones equivalentes. NUNCA le digas al cliente que hay un problema técnico sin haber llamado antes a esta tool.",
     inputSchema: z.object({
-      property_id: z.string().uuid().describe("UUID de la propiedad que se está discutiendo con el cliente."),
+      property_id: z
+        .string()
+        .optional()
+        .describe("UUID de la propiedad. Si no lo sabes, omítelo: la tool detecta automáticamente la propiedad que se está discutiendo."),
       count: z
         .number()
         .int()
@@ -46,10 +50,19 @@ export function makeSendMorePropertyPhotosTool(ctx: {
       };
 
       try {
+        const resolvedId = await resolveCurrentPropertyId({
+          organization_id: ctx.organization_id,
+          conversation_id: ctx.conversation_id,
+          candidate: property_id,
+        });
+        if (!resolvedId) {
+          await logEntry({ stage: "no_property_resolved", candidate: property_id });
+          return { ok: false, error: "No hay ninguna propiedad activa en esta conversación." };
+        }
         const { data: p, error: pErr } = await admin
           .from("properties")
           .select("photo_urls, title")
-          .eq("id", property_id)
+          .eq("id", resolvedId)
           .eq("organization_id", ctx.organization_id)
           .maybeSingle();
         if (pErr) {
@@ -57,7 +70,7 @@ export function makeSendMorePropertyPhotosTool(ctx: {
           return { ok: false, error: "No se pudo cargar la propiedad." };
         }
         if (!p) {
-          await logEntry({ stage: "property_not_found", property_id });
+          await logEntry({ stage: "property_not_found_after_resolve", resolvedId });
           return { ok: false, error: "Propiedad no encontrada." };
         }
 

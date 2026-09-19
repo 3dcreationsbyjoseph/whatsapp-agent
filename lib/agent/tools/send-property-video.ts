@@ -6,6 +6,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
+import { resolveCurrentPropertyId } from "../resolve-current-property";
 
 export function makeSendPropertyVideoTool(ctx: {
   organization_id: string;
@@ -18,7 +19,10 @@ export function makeSendPropertyVideoTool(ctx: {
     description:
       "Envía al cliente por WhatsApp el enlace del vídeo o tour virtual de una propiedad concreta. Úsala cuando el cliente pida ver un vídeo, un tour virtual o material visual adicional. Devuelve ok:false si la propiedad no tiene vídeo ni tour.",
     inputSchema: z.object({
-      property_id: z.string().uuid(),
+      property_id: z
+        .string()
+        .optional()
+        .describe("UUID de la propiedad. Si no lo sabes con seguridad, omítelo: la tool detecta la propiedad activa automáticamente."),
       prefer: z
         .enum(["video", "tour", "auto"])
         .default("auto")
@@ -27,10 +31,16 @@ export function makeSendPropertyVideoTool(ctx: {
     execute: async ({ property_id, prefer }) => {
       const admin = createAdminClient();
       try {
+        const resolvedId = await resolveCurrentPropertyId({
+          organization_id: ctx.organization_id,
+          conversation_id: ctx.conversation_id,
+          candidate: property_id,
+        });
+        if (!resolvedId) return { ok: false, error: "No hay ninguna propiedad activa en esta conversación." };
         const { data: p, error: pErr } = await admin
           .from("properties")
           .select("title, video_url, virtual_tour_url")
-          .eq("id", property_id)
+          .eq("id", resolvedId)
           .eq("organization_id", ctx.organization_id)
           .maybeSingle();
         if (pErr) {
