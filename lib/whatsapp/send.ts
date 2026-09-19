@@ -15,6 +15,8 @@ export async function sendWhatsAppText(
   body: string,
 ): Promise<SendResult> {
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
+  // preview_url:true hace que WhatsApp renderice la preview automática
+  // cuando el body incluye una URL (YouTube, Vimeo, artículos, etc.).
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -26,7 +28,7 @@ export async function sendWhatsAppText(
       recipient_type: "individual",
       to: toE164,
       type: "text",
-      text: { body },
+      text: { body, preview_url: true },
     }),
   });
   const data = (await res.json().catch(() => ({}))) as {
