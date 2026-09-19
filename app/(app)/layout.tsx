@@ -2,8 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   ChartLineIcon,
-  CalendarIcon,
+  BuildingApartmentIcon,
+  CalendarCheckIcon,
   ChatCircleIcon,
+  UsersFourIcon,
   SlidersHorizontalIcon,
   PlugIcon,
   SignOutIcon,
@@ -28,43 +30,47 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const orgName = Array.isArray(org) ? org[0]?.name : org?.name;
 
   const links = [
-    { href: "/dashboard", label: "Dashboard", icon: ChartLineIcon },
-    { href: "/citas", label: "Citas", icon: CalendarIcon },
+    { href: "/dashboard", label: "Panel", icon: ChartLineIcon },
+    { href: "/propiedades", label: "Propiedades", icon: BuildingApartmentIcon },
+    { href: "/visitas", label: "Visitas", icon: CalendarCheckIcon },
+    { href: "/leads", label: "Clientes", icon: UsersFourIcon },
     { href: "/conversaciones", label: "Conversaciones", icon: ChatCircleIcon },
     { href: "/personalizacion", label: "Personalización", icon: SlidersHorizontalIcon },
     { href: "/integraciones", label: "Integraciones", icon: PlugIcon },
   ];
 
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-60 shrink-0 border-r border-neutral-800 bg-neutral-950 p-4 flex flex-col">
-        <div className="mb-6">
-          <div className="text-lg font-semibold">WhatsApp Agent</div>
-          {orgName ? <div className="text-xs text-neutral-500 truncate">{orgName}</div> : null}
+    <div className="min-h-screen flex bg-neutral-950">
+      <aside className="w-64 shrink-0 border-r border-neutral-900 bg-black p-5 flex flex-col">
+        <div className="mb-8">
+          <div className="text-xs uppercase tracking-widest text-neutral-500">Agencia</div>
+          <div className="mt-1 text-base font-semibold text-white truncate">
+            {orgName ?? "—"}
+          </div>
         </div>
-        <nav className="flex-1 space-y-1">
+        <nav className="flex-1 space-y-0.5">
           {links.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white transition"
+              className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white transition"
             >
               <Icon size={18} weight="regular" />
               {label}
             </Link>
           ))}
         </nav>
-        <form action={logout} className="pt-4 border-t border-neutral-800">
+        <form action={logout} className="pt-4 mt-4 border-t border-neutral-900">
           <button
             type="submit"
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white transition"
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-500 hover:bg-neutral-900 hover:text-white transition"
           >
             <SignOutIcon size={18} />
             Cerrar sesión
           </button>
         </form>
       </aside>
-      <main className="flex-1 p-8 overflow-x-hidden">{children}</main>
+      <main className="flex-1 p-10 overflow-x-hidden">{children}</main>
     </div>
   );
 }

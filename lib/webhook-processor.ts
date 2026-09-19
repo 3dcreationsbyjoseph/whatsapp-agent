@@ -139,13 +139,22 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               content: h.content!,
             }));
 
+          const { data: orgRow } = await admin
+            .from("organizations")
+            .select("name")
+            .eq("id", organization_id)
+            .single();
+
           const start = Date.now();
           const { text } = await runAgent({
             organization_id,
+            organization_name: orgRow?.name ?? "",
             timezone,
             conversation_id: conv.id,
             contact_id: contact.id,
             contact_phone: m.from,
+            phone_number_id: wa.phone_number_id,
+            access_token: decrypt(wa.access_token_encrypted),
             agent_config: agentCfg,
             gcal_config: gcal,
             chat_history,
