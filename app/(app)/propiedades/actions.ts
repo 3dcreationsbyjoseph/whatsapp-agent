@@ -11,6 +11,27 @@ function parseCsv(input: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+// Normaliza URLs de imagen para que WhatsApp pueda descargarlas.
+// Corrige los formatos más comunes que los usuarios pegan por error.
+function normalizePhotoUrl(raw: string): string {
+  const url = raw.trim();
+  // Imgur: página → i.imgur.com/xxx.jpg
+  const imgurMatch = url.match(/^https?:\/\/(?:www\.)?imgur\.com\/(?:gallery\/|a\/)?([A-Za-z0-9]{5,15})(?:\.(?:jpg|jpeg|png|webp|gif))?(?:\?.*)?$/i);
+  if (imgurMatch) return `https://i.imgur.com/${imgurMatch[1]}.jpg`;
+  // Dropbox: ?dl=0 → ?raw=1
+  if (url.includes("dropbox.com") && !url.includes("raw=1")) {
+    return url.replace(/[?&]dl=0/, "").replace(/$/, url.includes("?") ? "&raw=1" : "?raw=1");
+  }
+  // Google Drive: /file/d/{id}/view → /uc?export=view&id={id}
+  const gdrive = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (gdrive) return `https://drive.google.com/uc?export=view&id=${gdrive[1]}`;
+  return url;
+}
+
+function parsePhotoUrls(input: string): string[] {
+  return parseCsv(input).map(normalizePhotoUrl);
+}
+
 function parseInt2(input: FormDataEntryValue | null): number | null {
   if (input == null) return null;
   const s = String(input).trim();
@@ -44,7 +65,7 @@ export async function upsertProperty(formData: FormData) {
     plot_area_m2: parseInt2(formData.get("plot_area_m2")),
     features: parseCsv(String(formData.get("features") ?? "")) as unknown as never,
     description: String(formData.get("description") ?? "").trim() || null,
-    photo_urls: parseCsv(String(formData.get("photo_urls") ?? "")) as unknown as never,
+    photo_urls: parsePhotoUrls(String(formData.get("photo_urls") ?? "")) as unknown as never,
     video_url: String(formData.get("video_url") ?? "").trim() || null,
     virtual_tour_url: String(formData.get("virtual_tour_url") ?? "").trim() || null,
     status: String(formData.get("status") ?? "available").trim(),
