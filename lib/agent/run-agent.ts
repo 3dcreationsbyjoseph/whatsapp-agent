@@ -11,6 +11,7 @@ import { makeListUpcomingAppointmentsTool } from "./tools/list-upcoming-appointm
 import { makeCancelAppointmentTool } from "./tools/cancel-appointment";
 import { makeSearchPropertiesTool } from "./tools/search-properties";
 import { makeSendPropertyToClientTool } from "./tools/send-property-to-client";
+import { makeSendPropertyVideoTool } from "./tools/send-property-video";
 import { makeSaveLeadTool } from "./tools/save-lead";
 import { makeBookVisitTool } from "./tools/book-visit";
 import type { GCalConfig } from "@/lib/google/calendar";
@@ -43,6 +44,13 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       organization_id: input.organization_id,
     }),
     send_property_to_client: makeSendPropertyToClientTool({
+      organization_id: input.organization_id,
+      contact_phone: input.contact_phone,
+      conversation_id: input.conversation_id,
+      phone_number_id: input.phone_number_id,
+      access_token: input.access_token,
+    }),
+    send_property_video: makeSendPropertyVideoTool({
       organization_id: input.organization_id,
       contact_phone: input.contact_phone,
       conversation_id: input.conversation_id,
