@@ -16,16 +16,16 @@ export function makeSendPropertyToClientTool(ctx: {
 }) {
   return tool({
     description:
-      "Envía por WhatsApp al cliente la FICHA COMPLETA de una propiedad concreta con sus fotos. Úsala cuando el cliente muestre interés en una propiedad específica de las que has listado con search_properties. NO llames a esta tool más de una vez por propiedad en la misma conversación.",
+      "Envía por WhatsApp al cliente la FICHA COMPLETA de una propiedad + hasta 6 fotos. Úsala UNA vez por propiedad cuando el cliente muestre interés. Si el cliente pide MÁS fotos después, usa send_more_property_photos (no vuelvas a llamar esta tool).",
     inputSchema: z.object({
       property_id: z.string().uuid(),
-      max_photos: z.number().int().min(0).max(8).default(5),
       caption_language: z
         .string()
         .default("es")
-        .describe("Código ISO del idioma del cliente para la caption (es, en, de, nl, fr, sv, no, da...)."),
+        .describe("Código ISO del idioma del cliente (es, en, de, nl, fr, sv, no, da...)."),
     }),
-    execute: async ({ property_id, max_photos, caption_language }) => {
+    execute: async ({ property_id, caption_language }) => {
+      const max_photos = 6;
       const admin = createAdminClient();
       const { data: p, error } = await admin
         .from("properties")
@@ -113,13 +113,23 @@ export function makeSendPropertyToClientTool(ctx: {
 
       // NB: caption_language se pasa al modelo como pista futura; hoy la ficha
       // sigue en ES/UTF-8 con emojis universales, funciona bien multi-idioma.
+      const remaining = Math.max(0, photos.length - sent);
       return {
         ok: true,
         text_sent: true,
         photos_sent: sent,
         photos_total: photos.length,
+        photos_remaining: remaining,
         photos_errors: errors,
-        note: "Ya enviaste la ficha completa y las fotos al cliente por WhatsApp. En tu siguiente mensaje NO repitas la ficha; solo pregunta si le encaja o si quiere agendar una visita.",
+        has_video: !!(p.video_url && p.video_url.trim().length > 0),
+        has_virtual_tour: !!(p.virtual_tour_url && p.virtual_tour_url.trim().length > 0),
+        note:
+          "Ya enviaste la ficha y las primeras fotos al cliente. En tu siguiente mensaje NO repitas la ficha. " +
+          (remaining > 0
+            ? `Menciona brevemente que existen ${remaining} fotografías adicionales disponibles si desea verlas (usa send_more_property_photos si las pide). `
+            : "") +
+          (p.video_url ? "La propiedad TIENE vídeo — si el cliente lo pide usa send_property_video. " : "") +
+          "Después pregunta si desea agendar visita presencial o llamada informativa.",
         language_hint: caption_language,
       };
     },
