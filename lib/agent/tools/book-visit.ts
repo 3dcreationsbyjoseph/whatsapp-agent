@@ -5,11 +5,13 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createEvent, type GCalConfig } from "@/lib/google/calendar";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveCurrentPropertyId } from "../resolve-current-property";
 
 type ServiceType = { name: string; duration_minutes: number; description?: string };
 
 export function makeBookVisitTool(ctx: {
   organization_id: string;
+  conversation_id: string;
   contact_id: string;
   contact_phone: string;
   gcal: GCalConfig | null;
@@ -20,13 +22,15 @@ export function makeBookVisitTool(ctx: {
     description:
       "Reserva una visita a una propiedad. Llámala SOLO cuando tengas: property_id, tipo de visita ('visita presencial' | 'video llamada' | 'llamada informativa'), fecha/hora ISO exacta que devolvió get_available_slots o check_slot_availability, nombre completo del cliente. Idempotente.",
     inputSchema: z.object({
-      property_id: z.string().uuid(),
+      property_id: z
+        .string()
+        .describe("La `ref` de la propiedad (también vale el id o el título)."),
       visit_type: z.enum(["presencial", "video_call", "llamada"]).default("presencial"),
       full_name: z.string().min(1),
       starts_at: z.string(),
       notes: z.string().optional(),
     }),
-    execute: async ({ property_id, visit_type, full_name, starts_at, notes }) => {
+    execute: async ({ property_id: rawPropertyId, visit_type, full_name, starts_at, notes }) => {
       const admin = createAdminClient();
 
       // Resuelve el servicio y la duración a partir del tipo.
@@ -39,6 +43,17 @@ export function makeBookVisitTool(ctx: {
         (s) => s.name.toLowerCase() === svcNameByType[visit_type],
       );
       const duration = svc?.duration_minutes ?? (visit_type === "presencial" ? 60 : 30);
+
+      // El modelo suele pasar la ref (no conoce el UUID de turnos anteriores).
+      const resolvedId = await resolveCurrentPropertyId({
+        organization_id: ctx.organization_id,
+        conversation_id: ctx.conversation_id,
+        candidate: rawPropertyId,
+      });
+      if (!resolvedId) {
+        return { ok: false, error: "No sé qué propiedad es. Pregunta al cliente cuál o usa search_properties para obtener su `ref`." };
+      }
+      const property_id = resolvedId;
 
       // Carga la propiedad para el título / summary.
       const { data: property } = await admin

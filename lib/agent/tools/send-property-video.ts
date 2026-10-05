@@ -22,7 +22,7 @@ export function makeSendPropertyVideoTool(ctx: {
       property_id: z
         .string()
         .optional()
-        .describe("UUID de la propiedad. Si no lo sabes con seguridad, omítelo: la tool detecta la propiedad activa automáticamente."),
+        .describe("La `ref` de la propiedad (o su id). Si no lo sabes, omítelo: la tool detecta la propiedad que se está discutiendo."),
       prefer: z
         .enum(["video", "tour", "auto"])
         .default("auto")

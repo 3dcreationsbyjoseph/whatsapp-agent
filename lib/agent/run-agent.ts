@@ -84,6 +84,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     }),
     book_visit: makeBookVisitTool({
       organization_id: input.organization_id,
+      conversation_id: input.conversation_id,
       contact_id: input.contact_id,
       contact_phone: input.contact_phone,
       gcal: input.gcal_config,
@@ -122,7 +123,15 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       },
       { role: "system", content: buildTemporalContext(input.timezone) },
     ],
-    messages: input.chat_history.map((m) => ({ role: m.role, content: m.content })),
+    // 2º breakpoint al final del historial: en un turno con varias tools, cada paso
+    // reutiliza la caché del historial (si el total supera el mínimo del modelo).
+    messages: input.chat_history.map((m, i, all) => ({
+      role: m.role,
+      content: m.content,
+      ...(i === all.length - 1
+        ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } } }
+        : {}),
+    })),
     temperature: AGENT_TEMPERATURE,
     // Tras un handoff no damos más pasos: el mensaje al cliente lo envía el processor.
     stopWhen: [stepCountIs(AGENT_MAX_STEPS), hasToolCall("request_human_handoff")],
