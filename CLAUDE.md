@@ -17,7 +17,7 @@ El brief completo (arquitectura, esquema DB, flujo del agente, endpoints, entreg
 | Iconos | `@phosphor-icons/react` |
 | BD + Auth | Supabase (Postgres + Auth + RLS) + `@supabase/ssr` |
 | Orquestación IA | Vercel AI SDK 6 (`ai` + `@ai-sdk/anthropic`) |
-| Modelo LLM | `anthropic('claude-sonnet-4-6')` |
+| Modelo LLM | `anthropic('claude-haiku-4-5')` |
 | WhatsApp | Cloud API (Meta Graph API) **v25.0** |
 | Calendario | Google Calendar API (OAuth 2.0) |
 | Deploy | Vercel — `runtime = 'nodejs'` en webhooks |
@@ -31,7 +31,7 @@ El brief completo (arquitectura, esquema DB, flujo del agente, endpoints, entreg
 - Runtime `nodejs` (no edge) en `/api/webhooks/*`: hace falta crypto nativo para HMAC.
 
 **Modelo Anthropic:**
-- Instancia con el string exacto `claude-sonnet-4-6`. **Nunca** uses alias `-latest` en producción.
+- Instancia con el string exacto `claude-haiku-4-5` (constante `ANTHROPIC_MODEL` en `lib/constants.ts`). **Nunca** uses alias `-latest` en producción.
 
 **WhatsApp Graph API:**
 - Centraliza la versión en una constante `GRAPH_API_VERSION` (valor inicial `'v25.0'`). Todas las URLs deben construirse a partir de ella.

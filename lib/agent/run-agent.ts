@@ -3,7 +3,7 @@
 import { generateText, hasToolCall, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { ANTHROPIC_MODEL, AGENT_MAX_STEPS, AGENT_TEMPERATURE } from "@/lib/constants";
-import { buildSystemPrompt, type AgentConfig } from "./system-prompt";
+import { buildSystemPrompt, buildTemporalContext, type AgentConfig } from "./system-prompt";
 import { makeGetAvailableSlotsTool } from "./tools/get-available-slots";
 import { makeCheckSlotAvailabilityTool } from "./tools/check-slot-availability";
 import { makeSaveContactInfoTool } from "./tools/save-contact-info";
@@ -112,7 +112,16 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
 
   const result = await generateText({
     model: anthropic(ANTHROPIC_MODEL),
-    system: buildSystemPrompt(input.agent_config, input.timezone, input.organization_name),
+    // Prompt caching: el breakpoint en el primer bloque cachea tools + prompt estable.
+    // La fecha/hora va en un segundo bloque, después del breakpoint.
+    system: [
+      {
+        role: "system",
+        content: buildSystemPrompt(input.agent_config, input.organization_name),
+        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      },
+      { role: "system", content: buildTemporalContext(input.timezone) },
+    ],
     messages: input.chat_history.map((m) => ({ role: m.role, content: m.content })),
     temperature: AGENT_TEMPERATURE,
     // Tras un handoff no damos más pasos: el mensaje al cliente lo envía el processor.
@@ -143,6 +152,9 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
         steps: result.steps?.length ?? 0,
         tool_calls: toolCalls,
         text_length: result.text?.length ?? 0,
+        // Si ambos son 0/undefined el prefijo no llega al mínimo cacheable del modelo.
+        cache_read_tokens: result.totalUsage?.inputTokenDetails?.cacheReadTokens ?? null,
+        cache_write_tokens: result.totalUsage?.inputTokenDetails?.cacheWriteTokens ?? null,
       }),
     );
   } catch (err) {
