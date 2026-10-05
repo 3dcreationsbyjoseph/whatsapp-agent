@@ -7,6 +7,9 @@ import type { Database } from "@/lib/database.types";
 import { PROTECTED_PREFIXES } from "@/lib/constants";
 
 export async function updateSession(request: NextRequest) {
+  // Ruta actual para los Server Components (el layout del dashboard la usa
+  // para el control de acceso por facturación).
+  request.headers.set("x-pathname", request.nextUrl.pathname);
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(

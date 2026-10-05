@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { runAgent } from "@/lib/agent/run-agent";
+import { getOrgBilling } from "@/lib/billing/access";
 import { DEFAULT_HANDOFF_MESSAGE } from "@/lib/agent/tools/request-human-handoff";
 import type { GCalConfig } from "@/lib/google/calendar";
 
@@ -106,6 +107,21 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         }
 
         if (!conv.bot_active) continue;
+
+        // Sin prueba vigente ni suscripción activa: guardamos el mensaje pero no respondemos.
+        const billing = await getOrgBilling(organization_id);
+        if (!billing.hasAccess) {
+          console.log(
+            JSON.stringify({
+              level: "info",
+              msg: "agent skipped: no billing access",
+              organization_id,
+              wa_message_id: m.id,
+              billing_status: billing.status,
+            }),
+          );
+          continue;
+        }
 
         // Ejecutar agente
         try {
