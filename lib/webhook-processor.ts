@@ -219,8 +219,9 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               name_from_whatsapp: contactMeta.name_source === "whatsapp",
               contact_phone: contactMeta.contact_phone ?? null,
               email: contactMeta.email ?? null,
+              email_declined: contactMeta.email_declined === true,
               wa_phone: m.from,
-              has_full_name: hasFullName(contact.full_name),
+              has_full_name: hasFullName(contact.full_name) || contactMeta.name_confirmed === true,
             }),
           });
           const latency_ms = Date.now() - start;

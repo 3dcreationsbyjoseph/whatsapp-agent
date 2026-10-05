@@ -60,7 +60,7 @@ export function buildSystemPrompt(
     "- book_visit(property_id, visit_type, full_name, starts_at): reserva la visita (property_id = la `ref` de la propiedad).",
     "- list_upcoming_appointments(): consulta las visitas confirmadas del cliente.",
     "- cancel_appointment(appointment_id): cancela una visita.",
-    "- save_contact_info(full_name?, contact_phone?, same_as_whatsapp?, email?): guarda nombre completo, teléfono de contacto y email del cliente en cuanto los diga.",
+    "- save_contact_info(full_name?, contact_phone?, same_as_whatsapp?, email?, email_declined?): guarda nombre y apellido, teléfono de contacto y email del cliente. Llámala SIEMPRE que el cliente dé cualquiera de esos datos.",
     "- request_human_handoff(reason, summary?): pasa la conversación a una persona del equipo y pausa el bot en este hilo.",
     "- send_request_email(summary): envía al cliente un email de acuse («hemos recibido su solicitud…»). Úsala cuando haga una petición que no sea reservar/cancelar una visita (p. ej. que le llamen, información por escrito, hacer una oferta). Las reservas, cancelaciones y traspasos ya envían su email solos.",
     "",
@@ -82,16 +82,17 @@ export function buildSystemPrompt(
     "   Si el cliente quiere visitar, pregunta si prefiere presencial, videollamada o llamada informativa. Después:",
     "   - Si te da una fecha+hora concreta → check_slot_availability(service='visita presencial' | 'video llamada' | 'llamada informativa', date, time).",
     "   - Si te da solo un día → get_available_slots(service, on_date).",
-    "   - Antes de reservar necesitas el nombre completo (nombre + DOS apellidos) y un teléfono de contacto (ver DATOS DEL CLIENTE).",
-    "   - Cuando tengas slot ISO + nombre completo + teléfono + ref de la propiedad + tipo → book_visit inmediatamente.",
+    "   - Antes de reservar necesitas: nombre y al menos UN apellido, teléfono de contacto y haberle pedido el email (ver DATOS DEL CLIENTE). book_visit te avisará si falta algo.",
+    "   - Cuando tengas slot ISO + nombre y apellido + teléfono + email (o que no quiera darlo) + ref + tipo → book_visit inmediatamente.",
     "   - Al cliente dile siempre la hora del campo `local` (hora de España), nunca la del ISO.",
     "   - Después de ok:true, un mensaje breve confirmando fecha, hora, propiedad, tipo de visita y despedida cordial.",
     "",
-    "6) DATOS DEL CLIENTE (nombre completo y teléfono):",
-    "   - Necesitamos nombre + DOS apellidos y un teléfono de contacto (puede ser distinto del WhatsApp).",
+    "6) DATOS DEL CLIENTE (nombre, apellido, teléfono y email):",
+    "   - Necesitamos nombre y AL MENOS UN apellido (muchas personas, p. ej. de Marruecos o Rumanía, tienen uno solo: nunca exijas un segundo apellido), un teléfono de contacto (puede ser distinto del WhatsApp) y pedirle su email.",
     "   - Pídelos de forma natural cuando el cliente muestre interés real (quiere ficha, visita o llamada) y, como muy tarde, antes de reservar. Nunca dejes sin responder sus preguntas por pedir datos.",
-    "   - Si da solo nombre o un apellido (p. ej. «José Juan»), pide con amabilidad los dos apellidos. Para el teléfono, pregunta si le contactamos en este mismo número de WhatsApp o en otro.",
-    "   - Después del teléfono, pide UNA vez su email (opcional, «para enviarle la confirmación por correo»). Si no quiere darlo, no insistas y sigue.",
+    "   - Si da solo el nombre (p. ej. «José Juan»), pide con amabilidad su apellido. Si te dice que lo que dio ya incluye su apellido, llama a save_contact_info con name_is_complete=true y no vuelvas a preguntar. Para el teléfono, pregunta si le contactamos en este mismo número de WhatsApp o en otro.",
+    "   - Después del teléfono y ANTES de reservar, pide UNA vez su email («para enviarle la confirmación por correo»). Si no quiere darlo, llama a save_contact_info con email_declined=true y sigue.",
+    "   - NUNCA digas que has enviado o que enviarás un email salvo que una tool devuelva email_confirmation «enviado/enviada».",
     "   - Si una tool devuelve email_confirmation «enviado…», menciona brevemente que le ha llegado la confirmación por correo.",
     "   - En cuanto te dé cualquiera de esos datos, llama a save_contact_info. No vuelvas a pedir lo que ya consta en DATOS DEL CLIENTE.",
     "",
@@ -165,19 +166,20 @@ export function buildContactContext(c: {
   name_from_whatsapp: boolean;
   contact_phone: string | null;
   email: string | null;
+  email_declined: boolean;
   wa_phone: string;
   has_full_name: boolean;
 }): string {
   const lines = ["DATOS DEL CLIENTE:"];
   if (c.full_name && !c.name_from_whatsapp) {
-    lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTAN apellidos: pídelos)"}`);
+    lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTA el apellido: pídelo)"}`);
   } else if (c.full_name) {
     lines.push(`- Nombre en su perfil de WhatsApp: ${c.full_name} (no confirmado; pídele nombre y dos apellidos)`);
   } else {
     lines.push("- Nombre: desconocido");
   }
   lines.push(c.contact_phone ? `- Teléfono de contacto: ${c.contact_phone}` : "- Teléfono de contacto: no facilitado");
-  lines.push(c.email ? `- Email: ${c.email}` : "- Email: no facilitado (opcional)");
+  lines.push(c.email ? `- Email: ${c.email}` : c.email_declined ? "- Email: prefiere no darlo (no insistas)" : "- Email: no facilitado (pídeselo antes de reservar)");
   lines.push(`- WhatsApp: +${c.wa_phone.replace(/^\+/, "")}`);
   return lines.join("\n");
 }

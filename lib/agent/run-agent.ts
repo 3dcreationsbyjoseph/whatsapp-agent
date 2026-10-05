@@ -99,7 +99,10 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     save_contact_info: makeSaveContactInfoTool({
       contact_id: input.contact_id,
       organization_id: input.organization_id,
+      conversation_id: input.conversation_id,
       wa_phone: input.contact_phone,
+      timezone: input.timezone,
+      gcal: input.gcal_config,
     }),
     list_upcoming_appointments: makeListUpcomingAppointmentsTool({
       organization_id: input.organization_id,

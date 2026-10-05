@@ -1,6 +1,8 @@
 // Utilidades para los datos del cliente (nombre y teléfono de contacto).
 // Sin dependencias: se pueden probar en local.
 
+import { analyzeName } from "./names";
+
 // Un nombre "real" tiene al menos 2 letras (descarta ".", "🙂", "-", etc.,
 // que es lo que a veces trae el perfil de WhatsApp).
 export function isRealName(name: string | null | undefined): name is string {
@@ -14,11 +16,10 @@ export function cleanName(name: string | null | undefined): string | null {
   return name.replace(/\s+/g, " ").trim();
 }
 
-// Nombre + dos apellidos = al menos 3 palabras con letras.
+// Nombre + al menos UN apellido (ver lib/names.ts: distingue "José Juan" de "José García").
 export function hasFullName(name: string | null | undefined): boolean {
   const n = cleanName(name);
-  if (!n) return false;
-  return n.split(" ").filter((w) => /\p{L}/u.test(w)).length >= 3;
+  return !!n && analyzeName(n).hasSurname;
 }
 
 // Normaliza a formato internacional (+34...). Por defecto España.
@@ -52,6 +53,9 @@ export function displayPhone(raw: string | null | undefined): string {
 export type ContactMetadata = {
   contact_phone?: string;
   email?: string;
+  email_declined?: boolean;
+  // El cliente confirmó que su nombre ya incluye el apellido (p. ej. "Juan Martín").
+  name_confirmed?: boolean;
   name_source?: "whatsapp" | "agent" | "staff";
   [key: string]: unknown;
 };

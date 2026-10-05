@@ -7,7 +7,7 @@ import { createEvent, type GCalConfig } from "@/lib/google/calendar";
 import { buildEvent, getBusy, overlaps } from "@/lib/google/availability";
 import { notifyClientByEmail } from "@/lib/email/notify";
 import { formatInTz, parseInTz } from "@/lib/format-date";
-import { cleanName, readMetadata } from "@/lib/contact-info";
+import { cleanName, hasFullName, readMetadata } from "@/lib/contact-info";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
@@ -111,6 +111,19 @@ export function makeBookVisitTool(ctx: {
           .maybeSingle<{ full_name: string | null; metadata: unknown }>();
         const meta = readMetadata(contactRow?.metadata);
         const contactPhone = meta.contact_phone ?? ctx.contact_phone;
+
+        // Datos mínimos antes de reservar (el modelo a veces se los salta).
+        const pending: string[] = [];
+        if (!meta.name_confirmed && !hasFullName(full_name) && !hasFullName(contactRow?.full_name)) pending.push("su apellido (nombre y al menos un apellido)");
+        if (!meta.contact_phone) pending.push("un teléfono de contacto (o confirmar que es este WhatsApp → same_as_whatsapp)");
+        if (!meta.email && !meta.email_declined) pending.push("su email para enviarle la confirmación (si no quiere darlo, save_contact_info con email_declined=true)");
+        if (pending.length) {
+          return {
+            ok: false,
+            missing_before_booking: pending,
+            error: `Todavía no reserves. Pide al cliente, en un único mensaje amable: ${pending.join("; ")}. Guarda lo que te dé con save_contact_info y vuelve a llamar a book_visit con la misma hora.`,
+          };
+        }
 
         const startIso = new Date(startMs).toISOString();
         const endIso = new Date(endMs).toISOString();
