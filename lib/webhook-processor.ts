@@ -218,6 +218,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               full_name: cleanName(contact.full_name),
               name_from_whatsapp: contactMeta.name_source === "whatsapp",
               contact_phone: contactMeta.contact_phone ?? null,
+              email: contactMeta.email ?? null,
               wa_phone: m.from,
               has_full_name: hasFullName(contact.full_name),
             }),

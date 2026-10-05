@@ -5,6 +5,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatInTz } from "@/lib/format-date";
+import { readMetadata } from "@/lib/contact-info";
 import { createEvent, getFreeBusy, isGoogleAuthError, type GCalConfig } from "./calendar";
 
 export type BusyRange = { start: string; end: string };
@@ -47,6 +48,7 @@ export function overlaps(busy: BusyRange[], startMs: number, endMs: number): boo
 type EventInput = {
   full_name: string;
   phone: string;
+  email?: string | null;
   wa_phone?: string | null;
   visit_type: string;
   notes?: string | null;
@@ -69,6 +71,7 @@ export function buildEvent(a: EventInput, timezone: string) {
     description: [
       `Cliente: ${a.full_name}`,
       `Teléfono: ${a.phone}`,
+      a.email ? `Email: ${a.email}` : null,
       a.wa_phone && a.wa_phone !== a.phone ? `WhatsApp: ${a.wa_phone}` : null,
       a.property?.reference ? `Referencia: ${a.property.reference}` : null,
       a.property ? `Ubicación: ${a.property.location}` : null,
@@ -94,19 +97,29 @@ export async function syncPendingAppointments(
   const admin = createAdminClient();
   const { data: pending } = await admin
     .from("appointments")
-    .select("id, full_name, phone, visit_type, notes, starts_at, ends_at, created_at, property:properties(title, reference, location, agent_name, agent_phone)")
+    .select("id, full_name, phone, visit_type, notes, starts_at, ends_at, created_at, contact:contacts(metadata), property:properties(title, reference, location, agent_name, agent_phone)")
     .eq("organization_id", organization_id)
     .eq("status", "confirmed")
     .is("google_event_id", null)
     .gt("starts_at", new Date().toISOString())
-    .returns<Array<EventInput & { id: string; property: EventInput["property"] | EventInput["property"][] }>>();
+    .returns<
+      Array<
+        EventInput & {
+          id: string;
+          contact: { metadata: unknown } | { metadata: unknown }[] | null;
+          property: EventInput["property"] | EventInput["property"][];
+        }
+      >
+    >();
 
   let synced = 0;
   let failed = 0;
   for (const a of pending ?? []) {
     const property = Array.isArray(a.property) ? a.property[0] : a.property;
+    const contact = Array.isArray(a.contact) ? a.contact[0] : a.contact;
+    const email = readMetadata(contact?.metadata).email ?? null;
     try {
-      const eventId = await createEvent(gcal, buildEvent({ ...a, property }, timezone));
+      const eventId = await createEvent(gcal, buildEvent({ ...a, property, email }, timezone));
       await admin.from("appointments").update({ google_event_id: eventId }).eq("id", a.id).eq("organization_id", organization_id);
       synced++;
     } catch (err) {

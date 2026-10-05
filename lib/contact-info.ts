@@ -51,6 +51,7 @@ export function displayPhone(raw: string | null | undefined): string {
 
 export type ContactMetadata = {
   contact_phone?: string;
+  email?: string;
   name_source?: "whatsapp" | "agent" | "staff";
   [key: string]: unknown;
 };
@@ -59,4 +60,11 @@ export function readMetadata(metadata: unknown): ContactMetadata {
   return metadata && typeof metadata === "object" && !Array.isArray(metadata)
     ? (metadata as ContactMetadata)
     : {};
+}
+
+// Email básico: algo@dominio.tld, en minúsculas. null si no es válido.
+export function normalizeEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const e = raw.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(e) ? e : null;
 }

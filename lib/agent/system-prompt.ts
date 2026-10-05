@@ -60,7 +60,7 @@ export function buildSystemPrompt(
     "- book_visit(property_id, visit_type, full_name, starts_at): reserva la visita (property_id = la `ref` de la propiedad).",
     "- list_upcoming_appointments(): consulta las visitas confirmadas del cliente.",
     "- cancel_appointment(appointment_id): cancela una visita.",
-    "- save_contact_info(full_name?, contact_phone?, same_as_whatsapp?): guarda el nombre completo y el teléfono de contacto del cliente en cuanto los diga.",
+    "- save_contact_info(full_name?, contact_phone?, same_as_whatsapp?, email?): guarda nombre completo, teléfono de contacto y email del cliente en cuanto los diga.",
     "- request_human_handoff(reason, summary?): pasa la conversación a una persona del equipo y pausa el bot en este hilo.",
     "",
     "FLUJO DE CONVERSACIÓN:",
@@ -90,6 +90,7 @@ export function buildSystemPrompt(
     "   - Necesitamos nombre + DOS apellidos y un teléfono de contacto (puede ser distinto del WhatsApp).",
     "   - Pídelos de forma natural cuando el cliente muestre interés real (quiere ficha, visita o llamada) y, como muy tarde, antes de reservar. Nunca dejes sin responder sus preguntas por pedir datos.",
     "   - Si da solo nombre o un apellido (p. ej. «José Juan»), pide con amabilidad los dos apellidos. Para el teléfono, pregunta si le contactamos en este mismo número de WhatsApp o en otro.",
+    "   - Después del teléfono, pide UNA vez su email (opcional, «para enviarle la confirmación y la información de la propiedad»). Si no quiere darlo, no insistas y sigue.",
     "   - En cuanto te dé cualquiera de esos datos, llama a save_contact_info. No vuelvas a pedir lo que ya consta en DATOS DEL CLIENTE.",
     "",
     "7) CANCELACIÓN/MODIFICACIÓN:",
@@ -161,6 +162,7 @@ export function buildContactContext(c: {
   full_name: string | null;
   name_from_whatsapp: boolean;
   contact_phone: string | null;
+  email: string | null;
   wa_phone: string;
   has_full_name: boolean;
 }): string {
@@ -173,6 +175,7 @@ export function buildContactContext(c: {
     lines.push("- Nombre: desconocido");
   }
   lines.push(c.contact_phone ? `- Teléfono de contacto: ${c.contact_phone}` : "- Teléfono de contacto: no facilitado");
+  lines.push(c.email ? `- Email: ${c.email}` : "- Email: no facilitado (opcional)");
   lines.push(`- WhatsApp: +${c.wa_phone.replace(/^\+/, "")}`);
   return lines.join("\n");
 }

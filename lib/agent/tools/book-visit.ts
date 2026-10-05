@@ -135,6 +135,7 @@ export function makeBookVisitTool(ctx: {
                 {
                   full_name,
                   phone: contactPhone,
+                  email: meta.email ?? null,
                   wa_phone: ctx.contact_phone,
                   visit_type,
                   notes: notes ?? null,
