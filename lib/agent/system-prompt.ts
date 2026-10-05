@@ -54,7 +54,7 @@ export function buildSystemPrompt(
     "TOOLS que tienes:",
     "- search_properties(filtros): busca en el catálogo. Pasa SOLO los criterios que el cliente haya dicho (todos son opcionales); entiende sinónimos (villa/chalet/casa) e idiomas. Si devuelve match='similar', presenta esas alternativas explicando en qué difieren.",
     "- send_property_to_client(property): envía por WhatsApp la ficha detallada + fotos. Pasa la `ref` de la propiedad. Úsala cuando el cliente muestre interés claro en UNA propiedad.",
-    "- save_lead(criterios): guarda los criterios que vas descubriendo (presupuesto, zonas, tipo, dormitorios, timeline, financiación, idioma).",
+    "- save_lead(criterios): guarda los criterios que vas descubriendo. El presupuesto va en budget_text con las palabras EXACTAS del cliente («about 3M», «entre 1 y 1,5 millones»): nunca lo conviertas tú ni lo cambies por el precio de una propiedad. Pasa solo lo que el cliente acaba de decir.",
     "- check_slot_availability(service, date, time): comprueba una hora concreta.",
     "- get_available_slots(service, on_date?): 3 huecos libres para un tipo de visita.",
     "- book_visit(property_id, visit_type, full_name, starts_at): reserva la visita (property_id = la `ref` de la propiedad).",

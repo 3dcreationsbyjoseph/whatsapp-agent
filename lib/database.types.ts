@@ -72,6 +72,18 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["messages"]["Insert"]>;
         Relationships: [];
       };
+      properties: {
+        Row: { id: string; organization_id: string; reference: string | null; title: string; location: string; property_type: string; price_eur: number; bedrooms: number; bathrooms: number; built_area_m2: number | null; plot_area_m2: number | null; features: Json; description: string | null; photo_urls: Json; video_url: string | null; virtual_tour_url: string | null; status: "available" | "reserved" | "sold" | "off_market"; agent_name: string | null; agent_phone: string | null; created_at: string; updated_at: string };
+        Insert: { id?: string; organization_id: string; reference?: string | null; title: string; location: string; property_type?: string; price_eur: number; bedrooms?: number; bathrooms?: number; built_area_m2?: number | null; plot_area_m2?: number | null; features?: Json; description?: string | null; photo_urls?: Json; video_url?: string | null; virtual_tour_url?: string | null; status?: "available" | "reserved" | "sold" | "off_market"; agent_name?: string | null; agent_phone?: string | null; created_at?: string; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["properties"]["Insert"]>;
+        Relationships: [];
+      };
+      leads: {
+        Row: { id: string; organization_id: string; contact_id: string; budget_min_eur: number | null; budget_max_eur: number | null; preferred_locations: Json; preferred_types: Json; min_bedrooms: number | null; min_bathrooms: number | null; needs_pool: boolean | null; needs_sea_view: boolean | null; timeline: string | null; financing: string | null; language: string | null; qualified: boolean | null; notes: string | null; created_at: string; updated_at: string };
+        Insert: { id?: string; organization_id: string; contact_id: string; budget_min_eur?: number | null; budget_max_eur?: number | null; preferred_locations?: Json; preferred_types?: Json; min_bedrooms?: number | null; min_bathrooms?: number | null; needs_pool?: boolean | null; needs_sea_view?: boolean | null; timeline?: string | null; financing?: string | null; language?: string | null; qualified?: boolean | null; notes?: string | null; created_at?: string; updated_at?: string };
+        Update: Partial<Database["public"]["Tables"]["leads"]["Insert"]>;
+        Relationships: [];
+      };
       appointments: {
         Row: { id: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id: string | null; status: "confirmed" | "cancelled" | "completed"; is_new_patient: boolean | null; full_name: string; phone: string; notes: string | null; property_id: string | null; visit_type: string | null; created_at: string };
         Insert: { id?: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id?: string | null; status?: "confirmed" | "cancelled" | "completed"; is_new_patient?: boolean | null; full_name: string; phone: string; notes?: string | null; property_id?: string | null; visit_type?: string | null; created_at?: string };

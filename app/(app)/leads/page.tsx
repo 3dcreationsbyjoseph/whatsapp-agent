@@ -145,10 +145,10 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
             const meta = readMetadata(c.metadata);
             const realName = cleanName(c.full_name);
             const isNew = now - new Date(c.created_at).getTime() < DAY_MS;
+            const bMin = lead?.budget_min_eur || null;
+            const bMax = lead?.budget_max_eur || null;
             const budget =
-              lead && (lead.budget_min_eur || lead.budget_max_eur)
-                ? [eur(lead.budget_min_eur), eur(lead.budget_max_eur)].filter(Boolean).join(" – ")
-                : null;
+              bMin && bMax ? `${eur(bMin)} – ${eur(bMax)}` : bMax ? `hasta ${eur(bMax)}` : bMin ? `desde ${eur(bMin)}` : null;
 
             return (
               <li key={c.id}>
