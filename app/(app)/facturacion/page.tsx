@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getOrgBilling } from "@/lib/billing/access";
 import { startCheckout, openBillingPortal } from "./actions";
+import { formatInTz } from "@/lib/format-date";
 
 const STATUS_LABEL: Record<string, string> = {
   trialing: "En prueba",
@@ -13,7 +14,6 @@ const STATUS_LABEL: Record<string, string> = {
   paused: "Pausada",
 };
 
-const dateFmt = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "long", year: "numeric" });
 
 export default async function FacturacionPage({
   searchParams,
@@ -72,7 +72,7 @@ export default async function FacturacionPage({
               <dt className="text-neutral-500">Prueba gratuita</dt>
               <dd className="mt-1 text-white">
                 {billing.daysLeft} {billing.daysLeft === 1 ? "día" : "días"} restantes (hasta el{" "}
-                {dateFmt.format(billing.trialEndsAt)})
+                {formatInTz(billing.trialEndsAt, null, "date")})
               </dd>
             </div>
           ) : null}
@@ -81,7 +81,7 @@ export default async function FacturacionPage({
               <dt className="text-neutral-500">
                 {billing.cancelAtPeriodEnd ? "Se cancela el" : "Próxima renovación"}
               </dt>
-              <dd className="mt-1 text-white">{dateFmt.format(billing.currentPeriodEnd)}</dd>
+              <dd className="mt-1 text-white">{formatInTz(billing.currentPeriodEnd, null, "date")}</dd>
             </div>
           ) : null}
         </dl>

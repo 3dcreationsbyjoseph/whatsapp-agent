@@ -60,7 +60,7 @@ export function buildSystemPrompt(
     "- book_visit(property_id, visit_type, full_name, starts_at): reserva la visita (property_id = la `ref` de la propiedad).",
     "- list_upcoming_appointments(): consulta las visitas confirmadas del cliente.",
     "- cancel_appointment(appointment_id): cancela una visita.",
-    "- save_contact_info(full_name?): guarda el nombre del cliente.",
+    "- save_contact_info(full_name?, contact_phone?, same_as_whatsapp?): guarda el nombre completo y el teléfono de contacto del cliente en cuanto los diga.",
     "- request_human_handoff(reason, summary?): pasa la conversación a una persona del equipo y pausa el bot en este hilo.",
     "",
     "FLUJO DE CONVERSACIÓN:",
@@ -81,10 +81,18 @@ export function buildSystemPrompt(
     "   Si el cliente quiere visitar, pregunta si prefiere presencial, videollamada o llamada informativa. Después:",
     "   - Si te da una fecha+hora concreta → check_slot_availability(service='visita presencial' | 'video llamada' | 'llamada informativa', date, time).",
     "   - Si te da solo un día → get_available_slots(service, on_date).",
-    "   - Cuando tengas slot ISO + nombre completo + property_id + tipo → book_visit inmediatamente.",
+    "   - Antes de reservar necesitas el nombre completo (nombre + DOS apellidos) y un teléfono de contacto (ver DATOS DEL CLIENTE).",
+    "   - Cuando tengas slot ISO + nombre completo + teléfono + ref de la propiedad + tipo → book_visit inmediatamente.",
+    "   - Al cliente dile siempre la hora del campo `local` (hora de España), nunca la del ISO.",
     "   - Después de ok:true, un mensaje breve confirmando fecha, hora, propiedad, tipo de visita y despedida cordial.",
     "",
-    "6) CANCELACIÓN/MODIFICACIÓN:",
+    "6) DATOS DEL CLIENTE (nombre completo y teléfono):",
+    "   - Necesitamos nombre + DOS apellidos y un teléfono de contacto (puede ser distinto del WhatsApp).",
+    "   - Pídelos de forma natural cuando el cliente muestre interés real (quiere ficha, visita o llamada) y, como muy tarde, antes de reservar. Nunca dejes sin responder sus preguntas por pedir datos.",
+    "   - Si da solo nombre o un apellido (p. ej. «José Juan»), pide con amabilidad los dos apellidos. Para el teléfono, pregunta si le contactamos en este mismo número de WhatsApp o en otro.",
+    "   - En cuanto te dé cualquiera de esos datos, llama a save_contact_info. No vuelvas a pedir lo que ya consta en DATOS DEL CLIENTE.",
+    "",
+    "7) CANCELACIÓN/MODIFICACIÓN:",
     "   Con list_upcoming_appointments + cancel_appointment. Ver también save_contact_info para actualizar nombre si aparece.",
     "",
     "REGLAS CRÍTICAS:",
@@ -94,6 +102,7 @@ export function buildSystemPrompt(
     "- NUNCA anuncies que vas a hacer algo después («permítame un momento», «le envío enseguida», «voy a verificar»): no existe un después, el turno termina con tu mensaje. Llama a la tool AHORA, en este mismo turno. Si la tool falla, dilo con claridad y ofrece una alternativa o usa request_human_handoff.",
     "- NUNCA menciones que eres una IA a menos que el cliente pregunte directamente; si pregunta, sé transparente.",
     "- Resuelves tú todo lo que puedas con las tools y los datos de la agencia. Para negociaciones de precio, ofertas o firmas, agenda una llamada informativa con el agente.",
+    "- Si una tool de agenda dice que Google Calendar está desconectado o falla: no hables de «problemas técnicos»; di que un agente le confirmará la cita personalmente, asegúrate de tener nombre completo y teléfono (save_contact_info) y llama a request_human_handoff con el resumen.",
     "- Llama a request_human_handoff (y no escribas nada más en ese turno; el sistema envía el mensaje de traspaso) cuando:",
     "  a) el cliente pida expresamente hablar con una persona;",
     "  b) no tengas la respuesta en los datos de la agencia ni en las tools — NUNCA inventes datos (precios, disponibilidad, características, condiciones legales o fiscales);",
@@ -145,4 +154,25 @@ export function buildTemporalContext(orgTimezone: string): string {
     `- Hoy en formato ISO: ${todayIso}`,
     `- Mañana en formato ISO: ${tomorrowIso}`,
   ].join("\n");
+}
+
+// Lo que sabemos del cliente en este momento. Parte volátil (después del breakpoint).
+export function buildContactContext(c: {
+  full_name: string | null;
+  name_from_whatsapp: boolean;
+  contact_phone: string | null;
+  wa_phone: string;
+  has_full_name: boolean;
+}): string {
+  const lines = ["DATOS DEL CLIENTE:"];
+  if (c.full_name && !c.name_from_whatsapp) {
+    lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTAN apellidos: pídelos)"}`);
+  } else if (c.full_name) {
+    lines.push(`- Nombre en su perfil de WhatsApp: ${c.full_name} (no confirmado; pídele nombre y dos apellidos)`);
+  } else {
+    lines.push("- Nombre: desconocido");
+  }
+  lines.push(c.contact_phone ? `- Teléfono de contacto: ${c.contact_phone}` : "- Teléfono de contacto: no facilitado");
+  lines.push(`- WhatsApp: +${c.wa_phone.replace(/^\+/, "")}`);
+  return lines.join("\n");
 }

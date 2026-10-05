@@ -21,9 +21,16 @@ export default function RealtimeRefresh({ channel }: { channel: string }) {
       .channel(channel)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, refresh)
       .subscribe();
+    // `contacts` no está en la publicación de Realtime: refresco periódico de respaldo
+    // para recoger cambios de nombre/teléfono aunque no llegue ningún evento.
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, 20_000);
     return () => {
       if (timer) clearTimeout(timer);
+      clearInterval(interval);
       supabase.removeChannel(ch);
     };
   }, [channel, router, supabase]);

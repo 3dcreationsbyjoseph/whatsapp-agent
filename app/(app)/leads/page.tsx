@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import DeleteButton from "../_components/delete-button";
 import RealtimeRefresh from "../_components/realtime-refresh";
 import { deleteContact } from "./actions";
+import { cleanName, displayPhone, readMetadata } from "@/lib/contact-info";
+import { formatInTz } from "@/lib/format-date";
 
 type Lead = {
   budget_min_eur: number | null;
@@ -18,13 +20,13 @@ type ContactRow = {
   id: string;
   wa_phone: string;
   full_name: string | null;
+  metadata: unknown;
   created_at: string;
   conversations: { id: string; last_message_at: string }[] | null;
   leads: Lead[] | Lead | null;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const dateFmt = new Intl.DateTimeFormat("es-ES", { dateStyle: "medium", timeStyle: "short" });
 const eur = (n?: number | null) =>
   n == null
     ? "—"
@@ -39,15 +41,16 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
   if (!user) return null;
   const { data: profile } = await supabase
     .from("profiles")
-    .select("organization_id")
+    .select("organization_id, organization:organizations(timezone)")
     .eq("id", user.id)
-    .single<{ organization_id: string }>();
+    .single<{ organization_id: string; organization: { timezone: string } | null }>();
   if (!profile) return null;
+  const tz = profile.organization?.timezone;
 
   let query = supabase
     .from("contacts")
     .select(
-      "id, wa_phone, full_name, created_at, conversations(id, last_message_at), leads(budget_min_eur, budget_max_eur, preferred_locations, preferred_types, timeline, language, qualified)",
+      "id, wa_phone, full_name, metadata, created_at, conversations(id, last_message_at), leads(budget_min_eur, budget_max_eur, preferred_locations, preferred_types, timeline, language, qualified)",
     )
     .eq("organization_id", profile.organization_id)
     .order("created_at", { ascending: false })
@@ -115,8 +118,10 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
                 const locs = Array.isArray(lead?.preferred_locations) ? (lead.preferred_locations as string[]) : [];
                 const types = Array.isArray(lead?.preferred_types) ? (lead.preferred_types as string[]) : [];
                 const isNew = now - new Date(c.created_at).getTime() < DAY_MS;
+                const realName = cleanName(c.full_name);
+                const contactPhone = readMetadata(c.metadata).contact_phone;
                 const name = (
-                  <span className="font-medium text-white">{c.full_name ?? "Sin nombre"}</span>
+                  <span className="font-medium text-white">{realName ?? displayPhone(contactPhone ?? c.wa_phone)}</span>
                 );
                 return (
                   <tr key={c.id} className="hover:bg-neutral-950">
@@ -135,10 +140,13 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
                           </span>
                         ) : null}
                       </div>
-                      <div className="text-xs text-neutral-500">{c.wa_phone}</div>
+                      <div className="text-xs text-neutral-400">
+                        {contactPhone ? `Tel. ${displayPhone(contactPhone)}` : "Teléfono no facilitado"}
+                      </div>
+                      <div className="text-xs text-neutral-600">WhatsApp {displayPhone(c.wa_phone)}</div>
                     </td>
                     <td className="px-4 py-3 text-neutral-300">
-                      {conv ? dateFmt.format(new Date(conv.last_message_at)) : "—"}
+                      {conv ? formatInTz(conv.last_message_at, tz) : "—"}
                     </td>
                     <td className="px-4 py-3 text-neutral-300">
                       {lead ? `${eur(lead.budget_min_eur)} – ${eur(lead.budget_max_eur)}` : "—"}
@@ -150,7 +158,7 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
                     <td className="px-4 py-3 text-right">
                       <DeleteButton
                         action={deleteContact.bind(null, c.id)}
-                        confirmText={`¿Borrar a ${c.full_name ?? c.wa_phone}? Se borrarán también sus conversaciones, mensajes, lead y visitas guardadas en la app. Las visitas ya agendadas en Google Calendar no se borran.`}
+                        confirmText={`¿Borrar a ${realName ?? displayPhone(c.wa_phone)}? Se borrarán también sus conversaciones, mensajes, lead y visitas guardadas en la app. Las visitas ya agendadas en Google Calendar no se borran.`}
                       />
                     </td>
                   </tr>

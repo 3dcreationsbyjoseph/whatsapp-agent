@@ -30,6 +30,8 @@ export type AgentInput = {
   agent_config: AgentConfig;
   gcal_config: GCalConfig | null;
   chat_history: Array<{ role: "user" | "assistant"; content: string }>;
+  // Lo que ya sabemos del cliente (nombre/teléfono). Va después del cache breakpoint.
+  contact_context: string;
 };
 
 export async function runAgent(input: AgentInput): Promise<{ text: string }> {
@@ -94,6 +96,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     save_contact_info: makeSaveContactInfoTool({
       contact_id: input.contact_id,
       organization_id: input.organization_id,
+      wa_phone: input.contact_phone,
     }),
     list_upcoming_appointments: makeListUpcomingAppointmentsTool({
       organization_id: input.organization_id,
@@ -121,7 +124,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
         content: buildSystemPrompt(input.agent_config, input.organization_name),
         providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
       },
-      { role: "system", content: buildTemporalContext(input.timezone) },
+      { role: "system", content: [buildTemporalContext(input.timezone), input.contact_context].join("\n\n") },
     ],
     // 2º breakpoint al final del historial: en un turno con varias tools, cada paso
     // reutiliza la caché del historial (si el total supera el mínimo del modelo).

@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import { calendarToolError, getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import { formatInTz } from "@/lib/format-date";
 
 type BusinessHours = Record<string, Array<{ start: string; end: string }>>;
 type Service = { name: string; duration_minutes: number; description?: string };
@@ -71,7 +72,7 @@ export function makeGetAvailableSlotsTool(ctx: {
 }) {
   return tool({
     description:
-      "Devuelve 3 huecos libres reales para un servicio en los próximos días, respetando horarios de atención y la agenda de Google Calendar. Nunca inventes horarios: siempre usa esta tool.",
+      "Devuelve 3 huecos libres reales (con su hora local en `local`; usa esa al hablar con el cliente) para un servicio en los próximos días, respetando horarios de atención y la agenda de Google Calendar. Nunca inventes horarios: siempre usa esta tool.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio (debe existir en la lista de servicios)"),
       days_ahead: z.number().int().min(1).max(30).default(7),
@@ -98,7 +99,12 @@ export function makeGetAvailableSlotsTool(ctx: {
       const rangeStart = new Date(now.getTime() + 60 * 60 * 1000); // desde +1h
       const rangeEnd = new Date(now.getTime() + days_ahead * 24 * 60 * 60 * 1000);
 
-      const busy = await getFreeBusy(ctx.gcal, rangeStart.toISOString(), rangeEnd.toISOString());
+      let busy: Awaited<ReturnType<typeof getFreeBusy>>;
+      try {
+        busy = await getFreeBusy(ctx.gcal, rangeStart.toISOString(), rangeEnd.toISOString());
+      } catch (err) {
+        return calendarToolError(err);
+      }
       const durationMs = svc.duration_minutes * 60_000;
 
       const slots: string[] = [];
@@ -149,7 +155,8 @@ export function makeGetAvailableSlotsTool(ctx: {
         service: svc.name,
         duration_minutes: svc.duration_minutes,
         timezone: ctx.timezone,
-        slots,
+        // `starts_at_iso` es para book_visit; al cliente dile la hora de `local` (hora de España).
+        slots: slots.map((iso) => ({ starts_at_iso: iso, local: formatInTz(iso, ctx.timezone, "long") })),
       };
     },
   });

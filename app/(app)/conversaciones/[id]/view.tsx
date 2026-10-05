@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { setBotActive, sendHumanMessage } from "./actions";
+import { formatInTz } from "@/lib/format-date";
 
 type Msg = {
   id: string;
@@ -16,12 +17,16 @@ export default function ConversationView({
   conversation_id,
   contact_wa_phone,
   contact_name,
+  contact_phone,
+  timezone,
   bot_active_initial,
   initial_messages,
 }: {
   conversation_id: string;
   contact_wa_phone: string;
   contact_name: string | null;
+  contact_phone: string | null;
+  timezone: string;
   bot_active_initial: boolean;
   initial_messages: Msg[];
 }) {
@@ -40,6 +45,7 @@ export default function ConversationView({
         { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${conversation_id}` },
         (payload) => {
           const m = payload.new as unknown as Msg;
+          if (m.content?.startsWith("[debug]")) return;
           setMessages((prev) => (prev.find((p) => p.id === m.id) ? prev : [...prev, m]));
         },
       )
@@ -82,7 +88,9 @@ export default function ConversationView({
       <header className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-3">
         <div>
           <div className="text-lg font-medium">{contact_name ?? contact_wa_phone}</div>
-          <div className="text-xs text-neutral-500">{contact_wa_phone}</div>
+          <div className="text-xs text-neutral-500">
+            {contact_phone ? `Tel. ${contact_phone} · ` : ""}WhatsApp {contact_wa_phone}
+          </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span className={botActive ? "text-emerald-400" : "text-yellow-400"}>
@@ -100,7 +108,7 @@ export default function ConversationView({
 
       <div className="flex-1 overflow-y-auto space-y-2 py-2">
         {messages.map((m) => (
-          <Bubble key={m.id} msg={m} />
+          <Bubble key={m.id} msg={m} timezone={timezone} />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -124,7 +132,7 @@ export default function ConversationView({
   );
 }
 
-function Bubble({ msg }: { msg: Msg }) {
+function Bubble({ msg, timezone }: { msg: Msg; timezone: string }) {
   const isOut = msg.direction === "outbound";
   const bg =
     msg.sender === "human"
@@ -138,7 +146,7 @@ function Bubble({ msg }: { msg: Msg }) {
         <div>{msg.content}</div>
         <div className="text-[10px] mt-1 text-neutral-400">
           {msg.sender === "bot" ? "Bot" : msg.sender === "human" ? "Tú" : ""}{" "}
-          {new Date(msg.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+          {formatInTz(msg.created_at, timezone, "time")}
         </div>
       </div>
     </div>

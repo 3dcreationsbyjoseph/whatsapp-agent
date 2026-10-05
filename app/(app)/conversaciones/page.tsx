@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import DeleteButton from "../_components/delete-button";
 import RealtimeRefresh from "../_components/realtime-refresh";
 import { deleteConversation } from "./actions";
+import { cleanName, displayPhone } from "@/lib/contact-info";
+import { formatInTz } from "@/lib/format-date";
 
 type ConvRow = {
   id: string;
@@ -20,10 +22,11 @@ export default async function ConversacionesPage() {
   if (!user) return null;
   const { data: profile } = await supabase
     .from("profiles")
-    .select("organization_id")
+    .select("organization_id, organization:organizations(timezone)")
     .eq("id", user.id)
-    .single<{ organization_id: string }>();
+    .single<{ organization_id: string; organization: { timezone: string } | null }>();
   if (!profile) return null;
+  const tz = profile.organization?.timezone;
 
   const { data: convs } = await supabase
     .from("conversations")
@@ -42,7 +45,8 @@ export default async function ConversacionesPage() {
       <ul className="rounded-lg border border-neutral-800 divide-y divide-neutral-800">
         {(convs ?? []).map((c) => {
           const contact = Array.isArray(c.contact) ? c.contact[0] : c.contact;
-          const label = contact?.full_name ?? contact?.wa_phone ?? "Sin nombre";
+          const realName = cleanName(contact?.full_name);
+          const label = realName ?? (contact?.wa_phone ? displayPhone(contact.wa_phone) : "Sin nombre");
           const isNew = now - new Date(c.created_at).getTime() < DAY_MS;
           return (
             <li key={c.id} className="flex items-center gap-3 pr-4 hover:bg-neutral-900">
@@ -57,8 +61,8 @@ export default async function ConversacionesPage() {
                     ) : null}
                   </div>
                   <div className="text-xs text-neutral-500">
-                    {contact?.full_name ? `${contact.wa_phone} · ` : ""}
-                    {new Date(c.last_message_at).toLocaleString("es-ES")}
+                    {realName && contact ? `${displayPhone(contact.wa_phone)} · ` : ""}
+                    {formatInTz(c.last_message_at, tz)}
                   </div>
                 </div>
                 {!c.bot_active ? (

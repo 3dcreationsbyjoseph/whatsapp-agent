@@ -5,6 +5,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { runAgent } from "@/lib/agent/run-agent";
+import { buildContactContext } from "@/lib/agent/system-prompt";
+import { cleanName, hasFullName, isRealName, readMetadata } from "@/lib/contact-info";
+import { DEFAULT_TIMEZONE } from "@/lib/format-date";
+import type { Json } from "@/lib/database.types";
 import { getOrgBilling } from "@/lib/billing/access";
 import { DEFAULT_HANDOFF_MESSAGE } from "@/lib/agent/tools/request-human-handoff";
 import type { GCalConfig } from "@/lib/google/calendar";
@@ -56,7 +60,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         .select("timezone")
         .eq("id", organization_id)
         .single();
-      const timezone = org?.timezone ?? "America/Mexico_City";
+      const timezone = org?.timezone ?? DEFAULT_TIMEZONE;
 
       for (const m of change.value.messages ?? []) {
         if (m.type !== "text" || !m.text) continue;
@@ -68,23 +72,26 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             { organization_id, wa_phone: m.from },
             { onConflict: "organization_id,wa_phone", ignoreDuplicates: false },
           )
-          .select("id, full_name, is_new_patient")
+          .select("id, full_name, is_new_patient, metadata")
           .single();
         if (!contact) continue;
+        const contactMeta = readMetadata(contact.metadata);
 
-        // Nombre del perfil de WhatsApp: solo si aún no tiene nombre (no pisamos
-        // el que haya guardado el agente con save_contact_info o el equipo).
-        const profileName = change.value.contacts
-          ?.find((c) => c.wa_id === m.from)
-          ?.profile?.name?.trim();
-        if (profileName && !contact.full_name) {
+        // Nombre del perfil de WhatsApp: solo si es un nombre real (no ".", emojis...)
+        // y el contacto no tiene ya uno válido. Queda marcado como "whatsapp" para
+        // que el nombre que dé el cliente (save_contact_info) lo sustituya.
+        const profileName = cleanName(
+          change.value.contacts?.find((c) => c.wa_id === m.from)?.profile?.name,
+        );
+        if (profileName && !isRealName(contact.full_name)) {
+          const metadata = { ...contactMeta, name_source: "whatsapp" as const };
           await admin
             .from("contacts")
-            .update({ full_name: profileName })
+            .update({ full_name: profileName, metadata: metadata as Json })
             .eq("id", contact.id)
-            .eq("organization_id", organization_id)
-            .is("full_name", null);
+            .eq("organization_id", organization_id);
           contact.full_name = profileName;
+          Object.assign(contactMeta, metadata);
         }
 
         // Upsert conversation
@@ -207,6 +214,13 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             agent_config: agentCfg,
             gcal_config: gcal,
             chat_history,
+            contact_context: buildContactContext({
+              full_name: cleanName(contact.full_name),
+              name_from_whatsapp: contactMeta.name_source === "whatsapp",
+              contact_phone: contactMeta.contact_phone ?? null,
+              wa_phone: m.from,
+              has_full_name: hasFullName(contact.full_name),
+            }),
           });
           const latency_ms = Date.now() - start;
 

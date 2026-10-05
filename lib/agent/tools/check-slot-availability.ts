@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import { calendarToolError, getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import { formatInTz } from "@/lib/format-date";
 
 type BusinessHours = Record<string, Array<{ start: string; end: string }>>;
 type Service = { name: string; duration_minutes: number; description?: string };
@@ -53,7 +54,7 @@ export function makeCheckSlotAvailabilityTool(ctx: {
 }) {
   return tool({
     description:
-      "Comprueba si un horario CONCRETO está libre para un servicio. Úsalo cuando el cliente proponga una fecha y hora específicas (ej. 'mañana a las 10'). Devuelve si está disponible, la cadena ISO exacta para book_appointment, y si no lo está sugiere 3 alternativas cercanas.",
+      "Comprueba si un horario CONCRETO está libre para un servicio. Úsalo cuando el cliente proponga una fecha y hora específicas (ej. 'mañana a las 10'). Devuelve si está disponible, la cadena ISO exacta para book_visit (y la hora local en `local` para decírsela al cliente), y si no lo está sugiere 3 alternativas cercanas.",
     inputSchema: z.object({
       service: z.string(),
       date: z.string().describe("YYYY-MM-DD en la zona horaria del negocio"),
@@ -109,11 +110,24 @@ export function makeCheckSlotAvailabilityTool(ctx: {
             if (t >= Date.now()) alternatives.push(new Date(t).toISOString());
           }
         }
-        return { ok: true, available: false, reason: "outside_business_hours", business_hours_today: ranges, alternative_slots: alternatives };
+        return {
+          ok: true,
+          available: false,
+          reason: "outside_business_hours",
+          business_hours_today: ranges,
+          alternative_slots: alternatives.map((iso) => ({ starts_at_iso: iso, local: formatInTz(iso, ctx.timezone, "long") })),
+        };
       }
 
       // Consulta FreeBusy para ese slot
-      const busy = await getFreeBusy(ctx.gcal, start.toISOString(), end.toISOString());
+      let busy: Awaited<ReturnType<typeof getFreeBusy>>;
+      try {
+        busy = await getFreeBusy(ctx.gcal, start.toISOString(), end.toISOString());
+      } catch (err) {
+        return calendarToolError(err);
+      }
+      // Alternativas con su hora local legible para el cliente.
+      const withLocal = (isos: string[]) => isos.map((iso) => ({ starts_at_iso: iso, local: formatInTz(iso, ctx.timezone, "long") }));
       const overlaps = busy.some((b) => {
         const bs = new Date(b.start!).getTime();
         const be = new Date(b.end!).getTime();
@@ -126,6 +140,7 @@ export function makeCheckSlotAvailabilityTool(ctx: {
           available: true,
           starts_at_iso: start.toISOString(),
           ends_at_iso: end.toISOString(),
+          local: formatInTz(start, ctx.timezone, "long"),
           service: svc.name,
           duration_minutes: svc.duration_minutes,
         };
@@ -151,7 +166,7 @@ export function makeCheckSlotAvailabilityTool(ctx: {
           if (!collide) alternatives.push(s.toISOString());
         }
       }
-      return { ok: true, available: false, reason: "busy", alternative_slots: alternatives };
+      return { ok: true, available: false, reason: "busy", alternative_slots: withLocal(alternatives) };
     },
   });
 }

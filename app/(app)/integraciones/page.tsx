@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { saveWhatsAppConfig, testWhatsApp } from "./actions";
 import Link from "next/link";
+import { checkGoogleConnection } from "@/lib/google/calendar";
 
 export default async function IntegracionesPage({ searchParams }: { searchParams: Promise<{ msg?: string; err?: string }> }) {
   const params = await searchParams;
@@ -21,11 +22,14 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
       .maybeSingle(),
     supabase
       .from("google_calendar_configs")
-      .select("calendar_id, token_expires_at")
+      .select("organization_id, calendar_id, refresh_token_encrypted, access_token_encrypted, token_expires_at")
       .eq("organization_id", profile.organization_id)
       .maybeSingle(),
     supabase.from("organizations").select("slug").eq("id", profile.organization_id).single(),
   ]);
+
+  // Comprueba en vivo que el permiso de Google sigue siendo válido (solo en servidor).
+  const gcalStatus = gcal ? await checkGoogleConnection(gcal) : null;
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const webhookUrl = `${appUrl}/api/webhooks/whatsapp`;
@@ -90,7 +94,21 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
             Conecta tu cuenta de Google para que el agente lea huecos libres y agende citas.
           </p>
         </div>
-        {gcal ? (
+        {gcal && gcalStatus && !gcalStatus.ok ? (
+          <div className="rounded-lg border border-red-900 bg-red-950/40 p-3 text-sm text-red-300 space-y-1">
+            <div className="font-medium">
+              {gcalStatus.reconnect
+                ? "El permiso de Google ha caducado o se ha revocado. Pulsa «Reconectar»."
+                : "No se pudo comprobar la conexión con Google Calendar."}
+            </div>
+            <div className="text-xs text-red-400/80">
+              Mientras tanto el asistente no puede agendar visitas y pasa esas conversaciones a tu equipo.
+              {gcalStatus.reconnect
+                ? " Si se repite cada semana, publica la app de OAuth en Google Cloud (modo Producción): en modo Testing el permiso caduca a los 7 días."
+                : ` Detalle: ${gcalStatus.error}`}
+            </div>
+          </div>
+        ) : gcal ? (
           <div className="text-sm text-emerald-400">
             Conectado. Calendario: <code className="text-white">{gcal.calendar_id}</code>
           </div>
