@@ -20,6 +20,8 @@ create table if not exists public.org_subscriptions (
 
 alter table public.org_subscriptions enable row level security;
 
+-- drop + create: la migración se puede ejecutar más de una vez sin error.
+drop policy if exists "org_subscriptions_select_own" on public.org_subscriptions;
 create policy "org_subscriptions_select_own" on public.org_subscriptions
   for select to authenticated
   using (organization_id = (select public.current_org_id()));
