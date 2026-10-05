@@ -132,13 +132,30 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .order("created_at", { ascending: false })
             .limit(20);
 
-          const chat_history = (history ?? [])
-            .filter((h) => h.content)
-            .reverse()
-            .map((h) => ({
-              role: h.direction === "inbound" ? ("user" as const) : ("assistant" as const),
-              content: h.content!,
-            }));
+          // Fuera del historial: logs "[debug]" (no son mensajes) y las URLs de
+          // cada foto, que se resumen en una línea "[N fotos enviadas]".
+          const chat_history: Array<{ role: "user" | "assistant"; content: string }> = [];
+          let pendingPhotos = 0;
+          const flushPhotos = () => {
+            if (pendingPhotos > 0) {
+              chat_history.push({ role: "assistant", content: `[${pendingPhotos} fotos enviadas]` });
+              pendingPhotos = 0;
+            }
+          };
+          for (const h of (history ?? []).slice().reverse()) {
+            const content = h.content?.trim();
+            if (!content || content.startsWith("[debug]")) continue;
+            if (h.direction !== "inbound" && content.startsWith("[imagen] ")) {
+              pendingPhotos++;
+              continue;
+            }
+            flushPhotos();
+            chat_history.push({
+              role: h.direction === "inbound" ? "user" : "assistant",
+              content,
+            });
+          }
+          flushPhotos();
 
           const { data: orgRow } = await admin
             .from("organizations")

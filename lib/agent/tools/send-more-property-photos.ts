@@ -21,7 +21,7 @@ export function makeSendMorePropertyPhotosTool(ctx: {
       property_id: z
         .string()
         .optional()
-        .describe("UUID de la propiedad. Si no lo sabes, omítelo: la tool detecta automáticamente la propiedad que se está discutiendo."),
+        .describe("La `ref` de la propiedad (o su id). Si no lo sabes, omítelo: la tool detecta la propiedad que se está discutiendo."),
       count: z
         .number()
         .int()
