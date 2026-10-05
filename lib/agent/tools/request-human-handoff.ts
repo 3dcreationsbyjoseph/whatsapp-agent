@@ -34,6 +34,16 @@ export function makeHandoffTool(ctx: {
         .eq("id", ctx.conversation_id)
         .eq("organization_id", ctx.organization_id);
       if (error) return { ok: false, error: error.message };
+      // Queda registrada para el panel "Atención humana" (motivo + resumen).
+      await admin.from("messages").insert({
+        conversation_id: ctx.conversation_id,
+        organization_id: ctx.organization_id,
+        wa_message_id: null,
+        direction: "outbound",
+        sender: "bot",
+        content: `[handoff] ${reason}${summary ? ` | ${summary}` : ""}`,
+        raw: null,
+      });
       console.log(
         JSON.stringify({
           level: "info",

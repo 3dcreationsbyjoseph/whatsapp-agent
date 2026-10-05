@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/browser";
 import { setBotActive, sendHumanMessage } from "./actions";
 import { formatInTz } from "@/lib/format-date";
+import { parseHandoff } from "@/lib/handoff";
 
 type Msg = {
   id: string;
@@ -133,6 +134,20 @@ export default function ConversationView({
 }
 
 function Bubble({ msg, timezone }: { msg: Msg; timezone: string }) {
+  // Notas internas: traspaso a una persona y emails enviados.
+  const handoff = parseHandoff(msg.content);
+  if (handoff || msg.content?.startsWith("[email] ")) {
+    return (
+      <div className="flex justify-center">
+        <div className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs text-yellow-300">
+          {handoff
+            ? `Pidió atención humana: ${handoff.reason}${handoff.summary ? ` — ${handoff.summary}` : ""}`
+            : `✉ ${msg.content!.slice("[email] ".length)}`}{" "}
+          · {formatInTz(msg.created_at, timezone, "time")}
+        </div>
+      </div>
+    );
+  }
   const isOut = msg.direction === "outbound";
   const bg =
     msg.sender === "human"

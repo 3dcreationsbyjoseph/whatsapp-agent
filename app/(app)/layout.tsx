@@ -9,6 +9,7 @@ import {
   SlidersHorizontalIcon,
   PlugIcon,
   CreditCardIcon,
+  HeadsetIcon,
   SignOutIcon,
 } from "@phosphor-icons/react/dist/ssr";
 import { headers } from "next/headers";
@@ -40,15 +41,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const onBillingPage = pathname === "/facturacion" || pathname.startsWith("/facturacion/");
   if (billing && !billing.hasAccess && !onBillingPage) redirect("/facturacion?expired=1");
 
+  // Clientes esperando a una persona (bot pausado) → contador en el menú.
+  const { count: pendingHumans } = profile
+    ? await supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", profile.organization_id)
+        .eq("bot_active", false)
+    : { count: 0 };
+
   const org = (profile?.organizations as { name: string } | { name: string }[] | null) ?? null;
   const orgName = Array.isArray(org) ? org[0]?.name : org?.name;
 
-  const links = [
+  const links: Array<{ href: string; label: string; icon: typeof ChartLineIcon; badge?: number }> = [
     { href: "/dashboard", label: "Panel", icon: ChartLineIcon },
     { href: "/propiedades", label: "Propiedades", icon: BuildingApartmentIcon },
     { href: "/visitas", label: "Visitas", icon: CalendarCheckIcon },
     { href: "/leads", label: "Clientes", icon: UsersFourIcon },
     { href: "/conversaciones", label: "Conversaciones", icon: ChatCircleIcon },
+    { href: "/atencion", label: "Atención humana", icon: HeadsetIcon, badge: pendingHumans ?? 0 },
     { href: "/personalizacion", label: "Personalización", icon: SlidersHorizontalIcon },
     { href: "/integraciones", label: "Integraciones", icon: PlugIcon },
     { href: "/facturacion", label: "Facturación", icon: CreditCardIcon },
@@ -64,14 +75,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <nav className="flex-1 space-y-0.5">
-          {links.map(({ href, label, icon: Icon }) => (
+          {links.map(({ href, label, icon: Icon, badge }) => (
             <Link
               key={href}
               href={href}
               className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-900 hover:text-white transition"
             >
               <Icon size={18} weight="regular" />
-              {label}
+              <span className="flex-1">{label}</span>
+              {badge ? (
+                <span className="rounded-full bg-yellow-500 px-1.5 text-[11px] font-semibold text-black">{badge}</span>
+              ) : null}
             </Link>
           ))}
         </nav>

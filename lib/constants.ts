@@ -22,4 +22,8 @@ export const PROTECTED_PREFIXES = [
   "/personalizacion",
   "/integraciones",
   "/facturacion",
+  "/atencion",
+  "/visitas",
+  "/leads",
+  "/propiedades",
 ] as const;
