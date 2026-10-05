@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { saveWhatsAppConfig, testWhatsApp } from "./actions";
 import Link from "next/link";
 import { checkGoogleConnection } from "@/lib/google/calendar";
+import { googleCalendarUrl } from "@/lib/google/links";
 
 export default async function IntegracionesPage({ searchParams }: { searchParams: Promise<{ msg?: string; err?: string }> }) {
   const params = await searchParams;
@@ -115,12 +116,24 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
         ) : (
           <div className="text-sm text-neutral-400">Aún no conectado.</div>
         )}
-        <Link
-          href="/api/auth/google/start"
-          className="inline-block rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-900 transition"
-        >
-          {gcal ? "Reconectar" : "Conectar con Google"}
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/api/auth/google/start"
+            className="inline-block rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-900 transition"
+          >
+            {gcal ? "Reconectar" : "Conectar con Google"}
+          </Link>
+          {gcal ? (
+            <a
+              href={googleCalendarUrl(gcal.calendar_id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block rounded-lg bg-white text-black font-medium px-4 py-2 text-sm hover:bg-neutral-200 transition"
+            >
+              Abrir Google Calendar ↗
+            </a>
+          ) : null}
+        </div>
       </section>
     </div>
   );

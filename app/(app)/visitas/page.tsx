@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatInTz } from "@/lib/format-date";
+import { googleCalendarDayUrl, googleCalendarUrl } from "@/lib/google/links";
+import { ArrowSquareOutIcon, CalendarBlankIcon } from "@phosphor-icons/react/dist/ssr";
 
 type VisitProperty = { title: string; location: string; reference: string | null; price_eur: number | null };
 type VisitRow = {
@@ -31,6 +33,13 @@ export default async function VisitasPage() {
     .single();
   const tz = org?.timezone ?? "Europe/Madrid";
 
+  const { data: gcal } = await supabase
+    .from("google_calendar_configs")
+    .select("calendar_id")
+    .eq("organization_id", profile.organization_id)
+    .maybeSingle<{ calendar_id: string }>();
+  const ymdFmt = new Intl.DateTimeFormat("en-CA", { timeZone: tz }); // YYYY-MM-DD
+
   const now = new Date();
   const inTwoMonths = new Date(now);
   inTwoMonths.setMonth(inTwoMonths.getMonth() + 2);
@@ -50,9 +59,31 @@ export default async function VisitasPage() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Visitas agendadas</h1>
-        <p className="text-sm text-neutral-500 mt-1">Próximas visitas a propiedades y llamadas informativas.</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">Visitas agendadas</h1>
+          <p className="text-sm text-neutral-500 mt-1">Próximas visitas a propiedades y llamadas informativas.</p>
+        </div>
+        {gcal ? (
+          <a
+            href={googleCalendarUrl(gcal.calendar_id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-white text-black font-medium px-4 py-2 text-sm hover:bg-neutral-200 transition"
+          >
+            <CalendarBlankIcon size={16} />
+            Abrir Google Calendar
+            <ArrowSquareOutIcon size={14} />
+          </a>
+        ) : (
+          <a
+            href="/integraciones"
+            className="inline-flex items-center gap-2 rounded-lg border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:bg-neutral-900 transition"
+          >
+            <CalendarBlankIcon size={16} />
+            Conectar Google Calendar
+          </a>
+        )}
       </div>
 
       {grouped.length === 0 ? (
@@ -62,7 +93,20 @@ export default async function VisitasPage() {
       ) : (
         grouped.map(([day, items]) => (
           <section key={day} className="space-y-2">
-            <h2 className="text-xs uppercase tracking-wide text-neutral-500">{day}</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs uppercase tracking-wide text-neutral-500">{day}</h2>
+              {gcal ? (
+                <a
+                  href={googleCalendarDayUrl(gcal.calendar_id, ymdFmt.format(new Date(items[0].starts_at)))}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-neutral-400 hover:text-white transition"
+                >
+                  Ver este día en Google Calendar
+                  <ArrowSquareOutIcon size={12} />
+                </a>
+              ) : null}
+            </div>
             <ul className="rounded-xl border border-neutral-800 divide-y divide-neutral-900 overflow-hidden">
               {items.map((a) => {
                 const property = Array.isArray(a.property) ? a.property[0] : a.property;
