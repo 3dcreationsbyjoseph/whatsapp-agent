@@ -73,8 +73,8 @@ export type Database = {
         Relationships: [];
       };
       appointments: {
-        Row: { id: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id: string | null; status: "confirmed" | "cancelled" | "completed"; is_new_patient: boolean | null; full_name: string; phone: string; notes: string | null; created_at: string };
-        Insert: { id?: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id?: string | null; status?: "confirmed" | "cancelled" | "completed"; is_new_patient?: boolean | null; full_name: string; phone: string; notes?: string | null; created_at?: string };
+        Row: { id: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id: string | null; status: "confirmed" | "cancelled" | "completed"; is_new_patient: boolean | null; full_name: string; phone: string; notes: string | null; property_id: string | null; visit_type: string | null; created_at: string };
+        Insert: { id?: string; organization_id: string; contact_id: string; service: string; starts_at: string; ends_at: string; google_event_id?: string | null; status?: "confirmed" | "cancelled" | "completed"; is_new_patient?: boolean | null; full_name: string; phone: string; notes?: string | null; property_id?: string | null; visit_type?: string | null; created_at?: string };
         Update: Partial<Database["public"]["Tables"]["appointments"]["Insert"]>;
         Relationships: [];
       };

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCodeForTokens } from "@/lib/google/oauth";
 import { listCalendars } from "@/lib/google/calendar";
+import { syncPendingAppointments } from "@/lib/google/availability";
+import { DEFAULT_TIMEZONE } from "@/lib/format-date";
 import { encrypt } from "@/lib/crypto";
 import { createClient } from "@/lib/supabase/server";
 
@@ -54,9 +56,31 @@ export async function GET(request: Request) {
       );
     if (error) throw error;
 
+    // Crea en Google las visitas reservadas mientras estaba desconectado.
+    const { data: org } = await supabase
+      .from("organizations")
+      .select("timezone")
+      .eq("id", profile.organization_id)
+      .single<{ timezone: string }>();
+    const { synced } = await syncPendingAppointments(
+      profile.organization_id,
+      {
+        organization_id: profile.organization_id,
+        calendar_id: primary.id,
+        refresh_token_encrypted: encrypt(tokens.refresh_token),
+        access_token_encrypted: tokens.access_token ? encrypt(tokens.access_token) : null,
+        token_expires_at: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      },
+      org?.timezone ?? DEFAULT_TIMEZONE,
+    );
+
     return NextResponse.redirect(
       new URL(
-        "/integraciones?msg=" + encodeURIComponent(`Conectado. Calendario: ${primary.summary}`),
+        "/integraciones?msg=" +
+          encodeURIComponent(
+            `Conectado. Calendario: ${primary.summary}` +
+              (synced ? ` · ${synced} visita(s) pendiente(s) añadidas a Google Calendar` : ""),
+          ),
         process.env.NEXT_PUBLIC_APP_URL,
       ),
     );

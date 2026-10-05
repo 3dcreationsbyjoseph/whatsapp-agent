@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { calendarToolError, getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import type { GCalConfig } from "@/lib/google/calendar";
+import { getBusy } from "@/lib/google/availability";
 import { formatInTz } from "@/lib/format-date";
 
 type BusinessHours = Record<string, Array<{ start: string; end: string }>>;
@@ -47,6 +48,7 @@ function localDayOfWeek(date: Date, timezone: string): number {
 }
 
 export function makeCheckSlotAvailabilityTool(ctx: {
+  organization_id: string;
   gcal: GCalConfig | null;
   timezone: string;
   services: Service[];
@@ -64,9 +66,6 @@ export function makeCheckSlotAvailabilityTool(ctx: {
       const svc = ctx.services.find((s) => s.name.toLowerCase() === service.toLowerCase());
       if (!svc) {
         return { ok: false, error: `Servicio "${service}" no configurado.` };
-      }
-      if (!ctx.gcal) {
-        return { ok: false, error: "Google Calendar aún no está conectado." };
       }
       const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
       const timeMatch = time.match(/^(\d{1,2}):(\d{2})$/);
@@ -120,12 +119,8 @@ export function makeCheckSlotAvailabilityTool(ctx: {
       }
 
       // Consulta FreeBusy para ese slot
-      let busy: Awaited<ReturnType<typeof getFreeBusy>>;
-      try {
-        busy = await getFreeBusy(ctx.gcal, start.toISOString(), end.toISOString());
-      } catch (err) {
-        return calendarToolError(err);
-      }
+      // Google + citas de la app. Si Google no responde, se sigue con las citas de la app.
+      const { busy } = await getBusy(ctx.organization_id, ctx.gcal, start.toISOString(), end.toISOString());
       // Alternativas con su hora local legible para el cliente.
       const withLocal = (isos: string[]) => isos.map((iso) => ({ starts_at_iso: iso, local: formatInTz(iso, ctx.timezone, "long") }));
       const overlaps = busy.some((b) => {

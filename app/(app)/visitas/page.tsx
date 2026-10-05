@@ -1,4 +1,21 @@
 import { createClient } from "@/lib/supabase/server";
+import { formatInTz } from "@/lib/format-date";
+
+type VisitProperty = { title: string; location: string; reference: string | null; price_eur: number | null };
+type VisitRow = {
+  id: string;
+  service: string;
+  visit_type: string | null;
+  starts_at: string;
+  ends_at: string;
+  status: string;
+  full_name: string;
+  phone: string;
+  notes: string | null;
+  created_at: string;
+  google_event_id: string | null;
+  property: VisitProperty | VisitProperty[] | null;
+};
 
 export default async function VisitasPage() {
   const supabase = await createClient();
@@ -20,12 +37,13 @@ export default async function VisitasPage() {
 
   const { data: rows } = await supabase
     .from("appointments")
-    .select("id, service, visit_type, starts_at, ends_at, status, full_name, phone, notes, property:properties(title, location, reference, price_eur)")
+    .select("id, service, visit_type, starts_at, ends_at, status, full_name, phone, notes, created_at, google_event_id, property:properties(title, location, reference, price_eur)")
     .eq("organization_id", profile.organization_id)
     .neq("status", "cancelled")
     .gte("starts_at", now.toISOString())
     .lt("starts_at", inTwoMonths.toISOString())
-    .order("starts_at", { ascending: true });
+    .order("starts_at", { ascending: true })
+    .returns<VisitRow[]>();
 
   const grouped = groupByDay(rows ?? [], tz);
   const fmt = (n?: number | null) => (n == null ? "—" : new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n));
@@ -67,9 +85,17 @@ export default async function VisitasPage() {
                         {a.full_name} · {a.phone}
                         {property?.price_eur ? ` · ${fmt(Number(property.price_eur))}` : ""}
                       </div>
+                      <div className="text-xs text-neutral-600 mt-1">
+                        Reservada el {formatInTz(a.created_at, tz)}
+                        {!a.google_event_id ? (
+                          <span className="ml-2 rounded-full border border-amber-500/40 px-2 py-0.5 text-amber-400">
+                            Pendiente de Google Calendar
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
                     <span className={`text-xs px-2 py-0.5 rounded-full border ${a.status === "confirmed" ? "border-emerald-500/40 text-emerald-400" : "border-neutral-700 text-neutral-400"}`}>
-                      {a.status}
+                      {a.status === "confirmed" ? "confirmada" : a.status === "completed" ? "realizada" : a.status}
                     </span>
                   </li>
                 );

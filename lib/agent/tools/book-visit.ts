@@ -3,7 +3,8 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { calendarToolError, createEvent, type GCalConfig } from "@/lib/google/calendar";
+import { createEvent, type GCalConfig } from "@/lib/google/calendar";
+import { buildEvent, getBusy, overlaps } from "@/lib/google/availability";
 import { formatInTz, parseInTz } from "@/lib/format-date";
 import { cleanName, readMetadata } from "@/lib/contact-info";
 import type { Json } from "@/lib/database.types";
@@ -73,10 +74,15 @@ export function makeBookVisitTool(ctx: {
           .select("title, reference, location, price_eur, agent_name, agent_phone")
           .eq("id", property_id)
           .eq("organization_id", ctx.organization_id)
-          .single();
+          .single<{
+            title: string;
+            reference: string | null;
+            location: string;
+            price_eur: number;
+            agent_name: string | null;
+            agent_phone: string | null;
+          }>();
         if (!property) return { ok: false, error: "Propiedad no encontrada." };
-
-        if (!ctx.gcal) return { ok: false, error: "Google Calendar no está conectado." };
 
         // Sin zona horaria explícita = hora local de la agencia (no UTC del servidor).
         const startMs = parseInTz(starts_at, ctx.timezone);
@@ -95,13 +101,6 @@ export function makeBookVisitTool(ctx: {
           .maybeSingle();
         if (existing) return { ok: true, already_booked: true, appointment_id: existing.id };
 
-        const summary =
-          visit_type === "presencial"
-            ? `Visita · ${property.title}`
-            : visit_type === "video_call"
-            ? `Video llamada · ${property.title}`
-            : `Llamada · ${property.title}`;
-
         // Teléfono de contacto facilitado por el cliente (si lo dio); si no, el de WhatsApp.
         const { data: contactRow } = await admin
           .from("contacts")
@@ -112,29 +111,47 @@ export function makeBookVisitTool(ctx: {
         const meta = readMetadata(contactRow?.metadata);
         const contactPhone = meta.contact_phone ?? ctx.contact_phone;
 
+        const startIso = new Date(startMs).toISOString();
+        const endIso = new Date(endMs).toISOString();
+
+        // Evita dobles reservas (Google + citas ya guardadas en la app).
+        const { busy } = await getBusy(ctx.organization_id, ctx.gcal, startIso, endIso);
+        if (overlaps(busy, startMs, endMs)) {
+          return {
+            ok: false,
+            available: false,
+            error: "Ese horario acaba de ocuparse. Usa check_slot_availability o get_available_slots para ofrecer otra hora.",
+          };
+        }
+
+        // La reserva se guarda SIEMPRE. Si Google Calendar no responde (p. ej. permiso
+        // caducado), el evento se crea automáticamente al reconectarlo en Integraciones.
+        const bookedAt = new Date().toISOString();
         let googleEventId: string | null = null;
-        try {
-          googleEventId = await createEvent(ctx.gcal, {
-            summary: `${summary} — ${full_name}`,
-            description: [
-              `Cliente: ${full_name}`,
-              `Teléfono: ${contactPhone}`,
-              contactPhone !== ctx.contact_phone ? `WhatsApp: ${ctx.contact_phone}` : null,
-              property.reference ? `Referencia: ${property.reference}` : null,
-              `Ubicación: ${property.location}`,
-              property.agent_name ? `Agente asignado: ${property.agent_name}` : null,
-              property.agent_phone ? `Teléfono agente: ${property.agent_phone}` : null,
-              notes ? `Notas: ${notes}` : null,
-            ]
-              .filter(Boolean)
-              .join("\n"),
-            start: new Date(startMs).toISOString(),
-            end: new Date(endMs).toISOString(),
-            timezone: ctx.timezone,
-            attendee_phone: ctx.contact_phone,
-          });
-        } catch (err) {
-          return calendarToolError(err);
+        if (ctx.gcal) {
+          try {
+            googleEventId = await createEvent(ctx.gcal, {
+              ...buildEvent(
+                {
+                  full_name,
+                  phone: contactPhone,
+                  wa_phone: ctx.contact_phone,
+                  visit_type,
+                  notes: notes ?? null,
+                  starts_at: startIso,
+                  ends_at: endIso,
+                  created_at: bookedAt,
+                  property,
+                },
+                ctx.timezone,
+              ),
+              attendee_phone: ctx.contact_phone,
+            });
+          } catch (err) {
+            console.warn(
+              JSON.stringify({ level: "warn", msg: "google createEvent failed; booking saved pending sync", organization_id: ctx.organization_id, err: (err as Error).message }),
+            );
+          }
         }
 
         const { data: inserted, error: insErr } = await admin
@@ -145,8 +162,9 @@ export function makeBookVisitTool(ctx: {
             property_id,
             visit_type,
             service: svcNameByType[visit_type] ?? "visita",
-            starts_at: new Date(startMs).toISOString(),
-            ends_at: new Date(endMs).toISOString(),
+            starts_at: startIso,
+            ends_at: endIso,
+            created_at: bookedAt,
             google_event_id: googleEventId,
             status: "confirmed",
             is_new_patient: null,
@@ -175,6 +193,9 @@ export function makeBookVisitTool(ctx: {
           property_title: property.title,
           visit_type,
           local: formatInTz(startMs, ctx.timezone, "long"),
+          booked_at_local: formatInTz(bookedAt, ctx.timezone, "datetime"),
+          google_calendar: googleEventId ? "creado" : "pendiente (se sincroniza al reconectar Google Calendar)",
+          note: "La visita está RESERVADA. Confírmasela al cliente con día y hora (`local`) y despídete con cordialidad. No digas que un agente la confirmará.",
         };
       } catch (err) {
         return { ok: false, error: `No se pudo reservar: ${(err as Error).message}. Usa request_human_handoff con el día/hora que pidió el cliente.` };

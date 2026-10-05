@@ -1,6 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { calendarToolError, getFreeBusy, type GCalConfig } from "@/lib/google/calendar";
+import type { GCalConfig } from "@/lib/google/calendar";
+import { getBusy } from "@/lib/google/availability";
 import { formatInTz } from "@/lib/format-date";
 
 type BusinessHours = Record<string, Array<{ start: string; end: string }>>;
@@ -65,6 +66,7 @@ function localYmd(date: Date, timezone: string): { y: number; m: number; d: numb
 }
 
 export function makeGetAvailableSlotsTool(ctx: {
+  organization_id: string;
   gcal: GCalConfig | null;
   timezone: string;
   services: Service[];
@@ -91,20 +93,13 @@ export function makeGetAvailableSlotsTool(ctx: {
           error: `Servicio "${service}" no configurado. Disponibles: ${ctx.services.map((s) => s.name).join(", ")}`,
         };
       }
-      if (!ctx.gcal) {
-        return { ok: false, error: "Google Calendar aún no está conectado para esta organización." };
-      }
 
       const now = new Date();
       const rangeStart = new Date(now.getTime() + 60 * 60 * 1000); // desde +1h
       const rangeEnd = new Date(now.getTime() + days_ahead * 24 * 60 * 60 * 1000);
 
-      let busy: Awaited<ReturnType<typeof getFreeBusy>>;
-      try {
-        busy = await getFreeBusy(ctx.gcal, rangeStart.toISOString(), rangeEnd.toISOString());
-      } catch (err) {
-        return calendarToolError(err);
-      }
+      // Google + citas de la app. Si Google no responde, se sigue con las citas de la app.
+      const { busy } = await getBusy(ctx.organization_id, ctx.gcal, rangeStart.toISOString(), rangeEnd.toISOString());
       const durationMs = svc.duration_minutes * 60_000;
 
       const slots: string[] = [];

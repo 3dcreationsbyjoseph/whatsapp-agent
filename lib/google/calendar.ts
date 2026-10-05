@@ -156,12 +156,12 @@ export function calendarToolError(err: unknown): { ok: false; error: string } {
       ok: false,
       error:
         GCAL_RECONNECT_MESSAGE +
-        " No puedes consultar ni reservar en la agenda ahora. Dile al cliente con naturalidad que un agente le confirmará la cita personalmente, guarda su nombre y teléfono con save_contact_info y llama a request_human_handoff con un resumen (propiedad, tipo de visita y día/hora que pidió).",
+        " La reserva se puede hacer igualmente con book_visit: se guarda en la app y se pasa a Google al reconectar.",
     };
   }
   return {
     ok: false,
-    error: `Error de Google Calendar: ${(err as Error)?.message ?? "desconocido"}. Si vuelve a fallar, usa request_human_handoff con el día/hora que pidió el cliente.`,
+    error: `Error de Google Calendar: ${(err as Error)?.message ?? "desconocido"}. Puedes reservar igualmente con book_visit.`,
   };
 }
 

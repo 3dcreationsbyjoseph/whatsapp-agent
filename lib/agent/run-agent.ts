@@ -73,12 +73,14 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       contact_id: input.contact_id,
     }),
     get_available_slots: makeGetAvailableSlotsTool({
+      organization_id: input.organization_id,
       gcal: input.gcal_config,
       timezone: input.timezone,
       services,
       business_hours: businessHours,
     }),
     check_slot_availability: makeCheckSlotAvailabilityTool({
+      organization_id: input.organization_id,
       gcal: input.gcal_config,
       timezone: input.timezone,
       services,
