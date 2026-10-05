@@ -1,0 +1,132 @@
+// Emails automáticos al cliente: acuse de solicitud de visita, cancelación y
+// cualquier otra petición. Solo si el cliente dio su email y la agencia tiene
+// Google conectado con permiso de Gmail. Nunca rompe el flujo del bot: si no se
+// puede enviar, lo registra y devuelve el motivo.
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { readMetadata, cleanName } from "@/lib/contact-info";
+import type { GCalConfig } from "@/lib/google/calendar";
+import { sendGmail } from "./gmail";
+
+export type EmailKind =
+  | { kind: "visit_booked"; when: string; visit: string; property?: string | null; location?: string | null }
+  | { kind: "visit_cancelled"; when: string; property?: string | null }
+  | { kind: "request_received"; summary: string };
+
+type Lang = "es" | "en";
+
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
+  const hi = lang === "es" ? `Hola${name ? ` ${name}` : ""},` : `Dear${name ? ` ${name}` : " client"},`;
+  const problems =
+    lang === "es"
+      ? "Si surgiera cualquier problema o cambio, le avisaremos lo antes posible por WhatsApp o por este correo."
+      : "Should any problem or change arise, we will let you know as soon as possible via WhatsApp or this email.";
+  const sign = lang === "es" ? `Un saludo,\n${org}` : `Kind regards,\n${org}`;
+
+  let subject: string;
+  let lines: string[];
+  switch (e.kind) {
+    case "visit_booked":
+      subject = lang === "es" ? `Hemos recibido su solicitud de visita — ${org}` : `We have received your viewing request — ${org}`;
+      lines =
+        lang === "es"
+          ? [
+              "Hemos recibido su solicitud y su cita ha quedado reservada:",
+              `• ${e.visit}: ${e.when}`,
+              ...(e.property ? [`• Propiedad: ${e.property}${e.location ? ` (${e.location})` : ""}`] : []),
+            ]
+          : [
+              "We have received your request and your appointment is booked:",
+              `• ${e.visit}: ${e.when}`,
+              ...(e.property ? [`• Property: ${e.property}${e.location ? ` (${e.location})` : ""}`] : []),
+            ];
+      break;
+    case "visit_cancelled":
+      subject = lang === "es" ? `Su cita ha sido cancelada — ${org}` : `Your appointment has been cancelled — ${org}`;
+      lines =
+        lang === "es"
+          ? [`Le confirmamos que su cita del ${e.when}${e.property ? ` (${e.property})` : ""} ha quedado cancelada.`, "Si desea una nueva fecha, escríbanos por WhatsApp."]
+          : [`We confirm that your appointment on ${e.when}${e.property ? ` (${e.property})` : ""} has been cancelled.`, "If you would like a new date, just message us on WhatsApp."];
+      break;
+    case "request_received":
+      subject = lang === "es" ? `Hemos recibido su solicitud — ${org}` : `We have received your request — ${org}`;
+      lines =
+        lang === "es"
+          ? ["Hemos recibido su solicitud:", `• ${e.summary}`, "Nos pondremos en contacto con usted en breve."]
+          : ["We have received your request:", `• ${e.summary}`, "We will get back to you shortly."];
+      break;
+  }
+
+  const text = [hi, "", ...lines, "", problems, "", sign].join("\n");
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#111">
+<p>${esc(hi)}</p>
+${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
+<p style="margin-top:16px">${esc(problems)}</p>
+<p style="margin-top:16px">${esc(sign).replace(/\n/g, "<br>")}</p>
+</div>`;
+  return { subject, text, html };
+}
+
+export async function notifyClientByEmail(params: {
+  organization_id: string;
+  contact_id: string;
+  conversation_id: string;
+  gcal: GCalConfig | null;
+  email: EmailKind;
+}): Promise<{ sent: boolean; reason?: string; to?: string }> {
+  const { organization_id, contact_id, conversation_id, gcal } = params;
+  const admin = createAdminClient();
+  try {
+    // `leads` aún no está en database.types.ts (placeholder): tipamos el resultado.
+    const [{ data: contact }, { data: org }] = await Promise.all([
+      admin
+        .from("contacts")
+        .select("full_name, metadata, leads(language)")
+        .eq("id", contact_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle<{
+          full_name: string | null;
+          metadata: unknown;
+          leads: { language: string | null }[] | { language: string | null } | null;
+        }>(),
+      admin.from("organizations").select("name").eq("id", organization_id).maybeSingle<{ name: string }>(),
+    ]);
+    const lead = Array.isArray(contact?.leads) ? contact?.leads[0] : contact?.leads;
+
+    const to = readMetadata(contact?.metadata).email;
+    if (!to) return { sent: false, reason: "El cliente no ha dado su email." };
+    if (!gcal) return { sent: false, reason: "Google no está conectado (Integraciones)." };
+
+    const lang: Lang = !lead?.language || lead.language.toLowerCase().startsWith("es") ? "es" : "en";
+    const orgName = org?.name ?? "";
+    const firstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
+    const { subject, text, html } = template(params.email, lang, firstName, orgName);
+
+    await sendGmail(gcal, { to, fromName: orgName, subject, text, html });
+
+    // Queda constancia en la conversación (lo ve el equipo y el propio bot).
+    await admin.from("messages").insert({
+      conversation_id,
+      organization_id,
+      wa_message_id: null,
+      direction: "outbound",
+      sender: "bot",
+      content: `[email] Enviado a ${to}: ${subject}`,
+      raw: null,
+    });
+    return { sent: true, to };
+  } catch (err) {
+    const message = (err as Error).message ?? "";
+    const insufficient = /insufficient|scope|permission/i.test(message);
+    console.warn(JSON.stringify({ level: "warn", msg: "client email failed", organization_id, contact_id, err: message }));
+    return {
+      sent: false,
+      reason: insufficient
+        ? "Falta el permiso de Gmail: reconecta Google en Integraciones."
+        : `No se pudo enviar el email: ${message}`,
+    };
+  }
+}

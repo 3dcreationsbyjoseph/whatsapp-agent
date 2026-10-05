@@ -1,6 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyClientByEmail } from "@/lib/email/notify";
+import type { GCalConfig } from "@/lib/google/calendar";
 
 export const DEFAULT_HANDOFF_MESSAGE =
   "Gracias por su paciencia. Un miembro de nuestro equipo le atenderá personalmente en breve.";
@@ -8,6 +10,8 @@ export const DEFAULT_HANDOFF_MESSAGE =
 export function makeHandoffTool(ctx: {
   conversation_id: string;
   organization_id: string;
+  contact_id: string;
+  gcal: GCalConfig | null;
   handoff_message: string;
 }) {
   return tool({
@@ -20,7 +24,7 @@ export function makeHandoffTool(ctx: {
       summary: z
         .string()
         .optional()
-        .describe("Resumen breve para el equipo humano: qué necesita el cliente."),
+        .describe("Resumen breve de lo que pide el cliente (también va en el email de acuse que recibe; escríbelo en su idioma)."),
     }),
     execute: async ({ reason, summary }) => {
       const admin = createAdminClient();
@@ -40,6 +44,16 @@ export function makeHandoffTool(ctx: {
           summary: summary ?? null,
         }),
       );
+      // Acuse por email de la petición (si el cliente dio su email).
+      if (summary) {
+        await notifyClientByEmail({
+          organization_id: ctx.organization_id,
+          contact_id: ctx.contact_id,
+          conversation_id: ctx.conversation_id,
+          gcal: ctx.gcal,
+          email: { kind: "request_received", summary },
+        });
+      }
       return {
         ok: true,
         message_to_send: ctx.handoff_message,

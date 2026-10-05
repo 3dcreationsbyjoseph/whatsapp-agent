@@ -2,10 +2,14 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { updateEventStatus, type GCalConfig } from "@/lib/google/calendar";
+import { notifyClientByEmail } from "@/lib/email/notify";
+import { formatInTz } from "@/lib/format-date";
 
 export function makeCancelAppointmentTool(ctx: {
   organization_id: string;
   contact_id: string;
+  conversation_id: string;
+  timezone: string;
   gcal: GCalConfig | null;
 }) {
   return tool({
@@ -20,7 +24,7 @@ export function makeCancelAppointmentTool(ctx: {
       // Verifica que la cita existe y pertenece a este contacto (seguridad).
       const { data: appt, error: findErr } = await admin
         .from("appointments")
-        .select("id, service, starts_at, google_event_id, status")
+        .select("id, service, starts_at, google_event_id, status, property:properties(title)")
         .eq("id", appointment_id)
         .eq("organization_id", ctx.organization_id)
         .eq("contact_id", ctx.contact_id)
@@ -54,11 +58,23 @@ export function makeCancelAppointmentTool(ctx: {
         .eq("id", appointment_id);
       if (updErr) return { ok: false, error: updErr.message };
 
+      const prop = (appt as unknown as { property?: { title: string } | { title: string }[] | null }).property;
+      const propertyTitle = Array.isArray(prop) ? prop[0]?.title : prop?.title;
+      const emailResult = await notifyClientByEmail({
+        organization_id: ctx.organization_id,
+        contact_id: ctx.contact_id,
+        conversation_id: ctx.conversation_id,
+        gcal: ctx.gcal,
+        email: { kind: "visit_cancelled", when: formatInTz(appt.starts_at, ctx.timezone, "long"), property: propertyTitle ?? null },
+      });
+
       return {
         ok: true,
         appointment_id,
         service: appt.service,
         starts_at: appt.starts_at,
+        local: formatInTz(appt.starts_at, ctx.timezone, "long"),
+        email_confirmation: emailResult.sent ? `enviado a ${emailResult.to}` : `no enviado: ${emailResult.reason}`,
       };
     },
   });

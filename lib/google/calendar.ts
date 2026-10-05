@@ -1,7 +1,7 @@
 // Cliente de Google Calendar autenticado con refresh_token cifrado.
 
 import { google, calendar_v3 } from "googleapis";
-import { getOAuthClient } from "./oauth";
+import { getOAuthClient, GMAIL_SEND_SCOPE } from "./oauth";
 import { decrypt, encrypt } from "@/lib/crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -13,7 +13,8 @@ export type GCalConfig = {
   token_expires_at: string | null;
 };
 
-function calendarClient(config: GCalConfig): calendar_v3.Calendar {
+// Cliente OAuth autenticado con los tokens de la organización (Calendar y Gmail).
+export function authedClient(config: GCalConfig) {
   const oauth2 = getOAuthClient();
   oauth2.setCredentials({
     refresh_token: decrypt(config.refresh_token_encrypted),
@@ -35,7 +36,11 @@ function calendarClient(config: GCalConfig): calendar_v3.Calendar {
     }
   });
 
-  return google.calendar({ version: "v3", auth: oauth2 });
+  return oauth2;
+}
+
+function calendarClient(config: GCalConfig): calendar_v3.Calendar {
+  return google.calendar({ version: "v3", auth: authedClient(config) });
 }
 
 export async function getFreeBusy(config: GCalConfig, timeMin: string, timeMax: string) {
@@ -168,12 +173,21 @@ export function calendarToolError(err: unknown): { ok: false; error: string } {
 // Comprueba si la conexión sigue viva (para el panel de Integraciones).
 export async function checkGoogleConnection(
   config: GCalConfig,
-): Promise<{ ok: true } | { ok: false; reconnect: boolean; error: string }> {
+): Promise<{ ok: true; canSendEmail: boolean } | { ok: false; reconnect: boolean; error: string }> {
   try {
     const oauth2 = getOAuthClient();
     oauth2.setCredentials({ refresh_token: decrypt(config.refresh_token_encrypted) });
-    await oauth2.getAccessToken();
-    return { ok: true };
+    const { token } = await oauth2.getAccessToken();
+    let canSendEmail = false;
+    if (token) {
+      try {
+        const info = await oauth2.getTokenInfo(token);
+        canSendEmail = (info.scopes ?? []).includes(GMAIL_SEND_SCOPE);
+      } catch {
+        // Si no se puede leer el detalle del token, lo damos por no disponible.
+      }
+    }
+    return { ok: true, canSendEmail };
   } catch (err) {
     return { ok: false, reconnect: isGoogleAuthError(err), error: (err as Error).message };
   }

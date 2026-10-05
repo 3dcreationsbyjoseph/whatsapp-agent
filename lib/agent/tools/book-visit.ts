@@ -5,6 +5,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createEvent, type GCalConfig } from "@/lib/google/calendar";
 import { buildEvent, getBusy, overlaps } from "@/lib/google/availability";
+import { notifyClientByEmail } from "@/lib/email/notify";
 import { formatInTz, parseInTz } from "@/lib/format-date";
 import { cleanName, readMetadata } from "@/lib/contact-info";
 import type { Json } from "@/lib/database.types";
@@ -187,8 +188,26 @@ export function makeBookVisitTool(ctx: {
             .eq("organization_id", ctx.organization_id);
         }
 
+        // Email automático de acuse (si el cliente dio su email).
+        const visitLabel =
+          visit_type === "video_call" ? "Videollamada" : visit_type === "llamada" ? "Llamada informativa" : "Visita presencial";
+        const emailResult = await notifyClientByEmail({
+          organization_id: ctx.organization_id,
+          contact_id: ctx.contact_id,
+          conversation_id: ctx.conversation_id,
+          gcal: ctx.gcal,
+          email: {
+            kind: "visit_booked",
+            when: formatInTz(startMs, ctx.timezone, "long"),
+            visit: visitLabel,
+            property: property.reference ? `${property.title} (Ref. ${property.reference})` : property.title,
+            location: property.location,
+          },
+        });
+
         return {
           ok: true,
+          email_confirmation: emailResult.sent ? `enviado a ${emailResult.to}` : `no enviado: ${emailResult.reason}`,
           appointment_id: inserted.id,
           google_event_id: googleEventId,
           property_title: property.title,

@@ -4,6 +4,8 @@
 import { google } from "googleapis";
 
 const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
+// Envío de emails automáticos al cliente desde la cuenta de Gmail de la agencia.
+export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
 export function getOAuthClient() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -20,7 +22,8 @@ export function getAuthUrl(state: string): string {
   return oauth2.generateAuthUrl({
     access_type: "offline",
     prompt: "consent", // fuerza refresh_token
-    scope: [CALENDAR_SCOPE],
+    scope: [CALENDAR_SCOPE, GMAIL_SEND_SCOPE],
+    include_granted_scopes: true,
     state,
   });
 }

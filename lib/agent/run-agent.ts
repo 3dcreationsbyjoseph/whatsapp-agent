@@ -16,6 +16,7 @@ import { makeSendPropertyVideoTool } from "./tools/send-property-video";
 import { makeSaveLeadTool } from "./tools/save-lead";
 import { makeBookVisitTool } from "./tools/book-visit";
 import { DEFAULT_HANDOFF_MESSAGE, makeHandoffTool } from "./tools/request-human-handoff";
+import { makeSendRequestEmailTool } from "./tools/send-request-email";
 import type { GCalConfig } from "@/lib/google/calendar";
 
 export type AgentInput = {
@@ -107,11 +108,21 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     cancel_appointment: makeCancelAppointmentTool({
       organization_id: input.organization_id,
       contact_id: input.contact_id,
+      conversation_id: input.conversation_id,
+      timezone: input.timezone,
+      gcal: input.gcal_config,
+    }),
+    send_request_email: makeSendRequestEmailTool({
+      organization_id: input.organization_id,
+      contact_id: input.contact_id,
+      conversation_id: input.conversation_id,
       gcal: input.gcal_config,
     }),
     request_human_handoff: makeHandoffTool({
       conversation_id: input.conversation_id,
       organization_id: input.organization_id,
+      contact_id: input.contact_id,
+      gcal: input.gcal_config,
       handoff_message: input.agent_config.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE,
     }),
   };

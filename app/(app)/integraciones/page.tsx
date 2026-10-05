@@ -110,8 +110,20 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
             </div>
           </div>
         ) : gcal ? (
-          <div className="text-sm text-emerald-400">
-            Conectado. Calendario: <code className="text-white">{gcal.calendar_id}</code>
+          <div className="space-y-2">
+            <div className="text-sm text-emerald-400">
+              Conectado. Calendario: <code className="text-white">{gcal.calendar_id}</code>
+            </div>
+            {gcalStatus?.ok && gcalStatus.canSendEmail ? (
+              <div className="text-sm text-emerald-400">
+                Emails automáticos a clientes: activos (se envían desde <code className="text-white">{gcal.calendar_id}</code>).
+              </div>
+            ) : (
+              <div className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
+                Emails automáticos a clientes: desactivados. Pulsa «Reconectar» y acepta el permiso de Gmail
+                («Enviar correo electrónico en tu nombre») para que el asistente envíe las confirmaciones por email.
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-sm text-neutral-400">Aún no conectado.</div>
