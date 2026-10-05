@@ -72,6 +72,21 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           .single();
         if (!contact) continue;
 
+        // Nombre del perfil de WhatsApp: solo si aún no tiene nombre (no pisamos
+        // el que haya guardado el agente con save_contact_info o el equipo).
+        const profileName = change.value.contacts
+          ?.find((c) => c.wa_id === m.from)
+          ?.profile?.name?.trim();
+        if (profileName && !contact.full_name) {
+          await admin
+            .from("contacts")
+            .update({ full_name: profileName })
+            .eq("id", contact.id)
+            .eq("organization_id", organization_id)
+            .is("full_name", null);
+          contact.full_name = profileName;
+        }
+
         // Upsert conversation
         const { data: conv } = await admin
           .from("conversations")
