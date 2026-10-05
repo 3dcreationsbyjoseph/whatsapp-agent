@@ -12,47 +12,15 @@ export type AgentConfig = {
   handoff_message: string | null;
 };
 
+// Parte estable del prompt (por organización): va con cache breakpoint de Anthropic.
+// No metas aquí nada que cambie por petición (fecha/hora, datos del contacto).
 export function buildSystemPrompt(
   config: AgentConfig,
-  orgTimezone: string,
   organizationName: string,
 ): string {
   const services = Array.isArray(config.services) ? config.services : [];
   const hours =
     typeof config.business_hours === "object" && config.business_hours ? config.business_hours : {};
-
-  const now = new Date();
-  const nowLocal = new Intl.DateTimeFormat("es-ES", {
-    timeZone: orgTimezone,
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(now);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: orgTimezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const p: Record<string, string> = {};
-  for (const part of parts) p[part.type] = part.value;
-  const todayIso = `${p.year}-${p.month}-${p.day}`;
-  const tomorrow = new Date(
-    Date.UTC(parseInt(p.year), parseInt(p.month) - 1, parseInt(p.day) + 1, 12, 0),
-  );
-  const tomorrowParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: orgTimezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(tomorrow);
-  const tp: Record<string, string> = {};
-  for (const part of tomorrowParts) tp[part.type] = part.value;
-  const tomorrowIso = `${tp.year}-${tp.month}-${tp.day}`;
 
   return [
     config.system_prompt.trim(),
@@ -76,11 +44,6 @@ export function buildSystemPrompt(
     "- No uses markdown pesado en chat; el asterisco simple *palabra* funciona como negrita en WhatsApp.",
     "- Nunca repitas literalmente lo que el cliente acaba de decir. Nunca hagas eco del último mensaje del bot.",
     "- Evita muletillas como \"¡Perfecto!\" al inicio de cada mensaje.",
-    "",
-    "CONTEXTO TEMPORAL (zona " + orgTimezone + "):",
-    `- Ahora mismo es: ${nowLocal}`,
-    `- Hoy en formato ISO: ${todayIso}`,
-    `- Mañana en formato ISO: ${tomorrowIso}`,
     "",
     "SERVICIOS DE VISITA disponibles:",
     JSON.stringify(services, null, 2),
@@ -132,5 +95,48 @@ export function buildSystemPrompt(
     "- Cuando un cliente pida algo fuera del ámbito (préstamos, informes fiscales, consultoría), reconduce con elegancia: puedes agendar una llamada con un agente.",
     "- Después de una acción confirmada (visita agendada, propiedad enviada, cita cancelada), y si el cliente inicia un tema nuevo, NO repitas la confirmación anterior.",
     "- Tu último mensaje del turno debe cerrar el pensamiento del cliente y avanzar; nunca lo dejes con la sensación de repetición.",
+  ].join("\n");
+}
+
+// Parte volátil: va DESPUÉS del cache breakpoint para no invalidar la caché.
+export function buildTemporalContext(orgTimezone: string): string {
+  const now = new Date();
+  const nowLocal = new Intl.DateTimeFormat("es-ES", {
+    timeZone: orgTimezone,
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: orgTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const p: Record<string, string> = {};
+  for (const part of parts) p[part.type] = part.value;
+  const todayIso = `${p.year}-${p.month}-${p.day}`;
+  const tomorrow = new Date(
+    Date.UTC(parseInt(p.year), parseInt(p.month) - 1, parseInt(p.day) + 1, 12, 0),
+  );
+  const tomorrowParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: orgTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(tomorrow);
+  const tp: Record<string, string> = {};
+  for (const part of tomorrowParts) tp[part.type] = part.value;
+  const tomorrowIso = `${tp.year}-${tp.month}-${tp.day}`;
+
+  return [
+    "CONTEXTO TEMPORAL (zona " + orgTimezone + "):",
+    `- Ahora mismo es: ${nowLocal}`,
+    `- Hoy en formato ISO: ${todayIso}`,
+    `- Mañana en formato ISO: ${tomorrowIso}`,
   ].join("\n");
 }
