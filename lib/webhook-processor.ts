@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { runAgent } from "@/lib/agent/run-agent";
+import { DEFAULT_HANDOFF_MESSAGE } from "@/lib/agent/tools/request-human-handoff";
 import type { GCalConfig } from "@/lib/google/calendar";
 
 type MetaMessage = {
@@ -169,9 +170,12 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .single();
 
           const accessToken = decrypt(wa.access_token_encrypted);
-          const reply = text?.trim() || (convAfter && !convAfter.bot_active
-            ? agentCfg.handoff_message ?? "Te paso con un humano en un momento."
-            : "");
+          // Si hubo handoff en este turno se envía siempre el mensaje configurado
+          // en Personalización (no el texto libre del modelo).
+          const handedOff = convAfter ? !convAfter.bot_active : false;
+          const reply = handedOff
+            ? agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE
+            : text?.trim() ?? "";
 
           if (reply) {
             const send = await sendWhatsAppText(wa.phone_number_id, accessToken, m.from, reply);

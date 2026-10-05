@@ -2,6 +2,9 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+export const DEFAULT_HANDOFF_MESSAGE =
+  "Gracias por su paciencia. Un miembro de nuestro equipo le atenderá personalmente en breve.";
+
 export function makeHandoffTool(ctx: {
   conversation_id: string;
   organization_id: string;
@@ -9,21 +12,38 @@ export function makeHandoffTool(ctx: {
 }) {
   return tool({
     description:
-      "Desactiva el bot en este hilo y envía el mensaje de handoff. Úsala cuando el cliente pida hablar con un humano, o cuando te trabes.",
+      "Pasa la conversación a una persona del equipo: pausa el bot en este hilo y el sistema envía al cliente el mensaje de handoff configurado. Úsala si el cliente pide hablar con una persona, si no tienes la respuesta en los datos de la agencia, o ante quejas o temas delicados. Después de llamarla NO escribas nada más.",
     inputSchema: z.object({
-      reason: z.string().optional(),
+      reason: z
+        .enum(["client_request", "unknown_answer", "complaint_or_sensitive", "other"])
+        .describe("Motivo del handoff"),
+      summary: z
+        .string()
+        .optional()
+        .describe("Resumen breve para el equipo humano: qué necesita el cliente."),
     }),
-    execute: async ({ reason }) => {
+    execute: async ({ reason, summary }) => {
       const admin = createAdminClient();
       const { error } = await admin
         .from("conversations")
         .update({ bot_active: false })
-        .eq("id", ctx.conversation_id);
+        .eq("id", ctx.conversation_id)
+        .eq("organization_id", ctx.organization_id);
       if (error) return { ok: false, error: error.message };
+      console.log(
+        JSON.stringify({
+          level: "info",
+          msg: "human handoff",
+          organization_id: ctx.organization_id,
+          conversation_id: ctx.conversation_id,
+          reason,
+          summary: summary ?? null,
+        }),
+      );
       return {
         ok: true,
         message_to_send: ctx.handoff_message,
-        reason: reason ?? null,
+        reason,
       };
     },
   });

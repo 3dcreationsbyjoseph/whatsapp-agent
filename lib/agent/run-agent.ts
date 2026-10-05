@@ -1,6 +1,6 @@
 // Ejecuta un turno del agente con AI SDK 6 + tools para inmobiliaria de lujo.
 
-import { generateText, stepCountIs } from "ai";
+import { generateText, hasToolCall, stepCountIs } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { ANTHROPIC_MODEL, AGENT_MAX_STEPS, AGENT_TEMPERATURE } from "@/lib/constants";
 import { buildSystemPrompt, type AgentConfig } from "./system-prompt";
@@ -15,6 +15,7 @@ import { makeSendMorePropertyPhotosTool } from "./tools/send-more-property-photo
 import { makeSendPropertyVideoTool } from "./tools/send-property-video";
 import { makeSaveLeadTool } from "./tools/save-lead";
 import { makeBookVisitTool } from "./tools/book-visit";
+import { DEFAULT_HANDOFF_MESSAGE, makeHandoffTool } from "./tools/request-human-handoff";
 import type { GCalConfig } from "@/lib/google/calendar";
 
 export type AgentInput = {
@@ -102,6 +103,11 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       contact_id: input.contact_id,
       gcal: input.gcal_config,
     }),
+    request_human_handoff: makeHandoffTool({
+      conversation_id: input.conversation_id,
+      organization_id: input.organization_id,
+      handoff_message: input.agent_config.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE,
+    }),
   };
 
   const result = await generateText({
@@ -109,7 +115,8 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     system: buildSystemPrompt(input.agent_config, input.timezone, input.organization_name),
     messages: input.chat_history.map((m) => ({ role: m.role, content: m.content })),
     temperature: AGENT_TEMPERATURE,
-    stopWhen: stepCountIs(AGENT_MAX_STEPS),
+    // Tras un handoff no damos más pasos: el mensaje al cliente lo envía el processor.
+    stopWhen: [stepCountIs(AGENT_MAX_STEPS), hasToolCall("request_human_handoff")],
     tools,
   });
 
