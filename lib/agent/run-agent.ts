@@ -1,7 +1,7 @@
 // Ejecuta un turno del agente con AI SDK 6 + tools para inmobiliaria de lujo.
 // El plan de la agencia decide el modelo, si hay Google Calendar y los idiomas.
 
-import { generateText, hasToolCall, stepCountIs, type ModelMessage } from "ai";
+import { generateText, hasToolCall, stepCountIs, type ModelMessage, type StopCondition } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import {
   ADVANCED_MODEL_EFFORT,
@@ -42,6 +42,8 @@ export type AgentInput = {
   chat_history: Array<{ role: "user" | "assistant"; content: string }>;
   // Lo que ya sabemos del cliente (nombre/teléfono). Va después del cache breakpoint.
   contact_context: string;
+  // Idioma en que debe responder (detectado en código y filtrado por el plan).
+  reply_language?: string | null;
 };
 
 export async function runAgent(input: AgentInput): Promise<{ text: string }> {
@@ -72,6 +74,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       phone_number_id: input.phone_number_id,
       access_token: input.access_token,
       plan,
+      reply_language: input.reply_language,
     }),
     send_property_video: makeSendPropertyVideoTool({
       organization_id: input.organization_id,
@@ -80,6 +83,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       phone_number_id: input.phone_number_id,
       access_token: input.access_token,
       plan,
+      reply_language: input.reply_language,
     }),
     send_more_property_photos: makeSendMorePropertyPhotosTool({
       organization_id: input.organization_id,
@@ -170,6 +174,19 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       : {}),
   }));
 
+  // Velocidad: si el modelo ya escribió la respuesta y en ese paso solo guardó datos
+  // (save_lead no cambia lo que hay que decir), no se pide otro paso al modelo
+  // (antes ese paso extra costaba ~1 s y casi siempre volvía vacío).
+  const SILENT_TOOLS = new Set(["save_lead"]);
+  const repliedWithSilentTools: StopCondition<typeof tools> = ({ steps }) => {
+    const last = steps[steps.length - 1];
+    return (
+      !!last?.text?.trim() &&
+      (last.toolCalls ?? []).length > 0 &&
+      (last.toolCalls ?? []).every((c) => SILENT_TOOLS.has(c.toolName))
+    );
+  };
+
   const run = (modelId: string, extra?: { messages?: ModelMessage[]; noTools?: boolean }) => {
     const advanced = modelId !== ANTHROPIC_MODEL;
     return generateText({
@@ -193,7 +210,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
         ? { providerOptions: { anthropic: { effort: ADVANCED_MODEL_EFFORT } } }
         : { temperature: AGENT_TEMPERATURE }),
       // Tras un handoff no damos más pasos: el mensaje al cliente lo envía el processor.
-      stopWhen: [stepCountIs(AGENT_MAX_STEPS), hasToolCall("request_human_handoff")],
+      stopWhen: [stepCountIs(AGENT_MAX_STEPS), hasToolCall("request_human_handoff"), repliedWithSilentTools],
       tools,
       ...(extra?.noTools ? { toolChoice: "none" as const } : {}),
     });
@@ -239,6 +256,10 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
         tool_calls: toolCalls,
         text_length: result.text?.length ?? 0,
         step_text_lengths: (result.steps ?? []).map((st) => st.text?.length ?? 0),
+        // Solo en local: vista previa de la respuesta para comprobar el idioma.
+        ...(process.env.NODE_ENV === "development"
+          ? { reply_preview: (result.steps ?? []).map((st) => st.text).filter(Boolean).join(" | ").slice(0, 90) }
+          : {}),
         // Si ambos son 0/undefined el prefijo no llega al mínimo cacheable del modelo.
         cache_read_tokens: result.totalUsage?.inputTokenDetails?.cacheReadTokens ?? null,
         cache_write_tokens: result.totalUsage?.inputTokenDetails?.cacheWriteTokens ?? null,

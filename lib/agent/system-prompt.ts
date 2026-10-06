@@ -221,8 +221,21 @@ export function buildContactContext(c: {
   lead?: LeadSummary | null;
   sent_properties?: Array<{ title: string; reference: string | null }>;
   upcoming_visits?: Array<{ local: string; visit: string; property: string | null }>;
+  reply_language?: string | null;
+  client_language?: string | null;
+  language_out_of_plan?: boolean;
 }): string {
-  const lines = ["DATOS DEL CLIENTE:"];
+  const langName = (code: string) => LANGUAGE_NAMES[code.split("-")[0]] ?? code;
+  const languageLines = c.reply_language
+    ? [
+        "IDIOMA DE ESTA RESPUESTA:",
+        c.language_out_of_plan && c.client_language
+          ? `- El cliente escribe en ${langName(c.client_language)}, que NO está incluido en el plan de la agencia. Responde en ${langName(c.reply_language)} (código ${c.reply_language}) y, solo la primera vez, dile con amabilidad en qué idiomas puedes atenderle.`
+          : `- Responde en ${langName(c.reply_language)} (código ${c.reply_language}). Es el idioma del cliente: mantenlo aunque el historial tenga mensajes en otros idiomas.`,
+        "",
+      ]
+    : [];
+  const lines = [...languageLines, "DATOS DEL CLIENTE:"];
   if (c.full_name && !c.name_from_whatsapp) {
     lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTA el apellido: pídelo)"}`);
   } else if (c.full_name) {

@@ -17,6 +17,8 @@ export function makeSendPropertyVideoTool(ctx: {
   phone_number_id: string;
   access_token: string;
   plan: PlanFeatures;
+  // Idioma del cliente decidido en código (prioritario sobre lo que diga el modelo).
+  reply_language?: string | null;
 }) {
   return tool({
     description:
@@ -80,7 +82,8 @@ export function makeSendPropertyVideoTool(ctx: {
 
         const errors: string[] = [];
         let sent = 0;
-        const target = language ? { language } : { sample: await clientLanguageSample(ctx.conversation_id) };
+        const lang = ctx.reply_language || language;
+        const target = lang ? { language: lang } : { sample: await clientLanguageSample(ctx.conversation_id) };
         for (const { label, url } of toSend) {
           try {
             // Se traduce solo la primera línea; la URL va aparte para que no se toque.

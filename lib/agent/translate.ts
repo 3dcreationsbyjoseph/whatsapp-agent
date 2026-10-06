@@ -14,6 +14,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { ANTHROPIC_MODEL } from "@/lib/constants";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { allowedLanguage, type PlanFeatures } from "@/lib/billing/plans";
+import { detectLanguageLocal } from "@/lib/lang-detect";
 
 const TIMEOUT_MS = 15_000;
 const LANG_CODE_RE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
@@ -48,6 +49,11 @@ export async function clientLanguageSample(conversation_id: string): Promise<str
 
 // Detecta el idioma de una muestra. La única salida aceptada es un código ISO.
 async function detectLanguage(sample: string): Promise<string | null> {
+  // Primero sin IA (instantáneo): último mensaje reconocible del cliente.
+  for (const line of sample.split("\n").reverse()) {
+    const local = detectLanguageLocal(line);
+    if (local) return local;
+  }
   try {
     const { text } = await generateText({
       model: anthropic(ANTHROPIC_MODEL),

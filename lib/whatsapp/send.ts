@@ -84,3 +84,27 @@ export async function testWhatsAppCredentials(phoneNumberId: string, accessToken
   if (!res.ok) return { ok: false, error: data?.error?.message ?? `HTTP ${res.status}` };
   return { ok: true, display_phone_number: data.display_phone_number };
 }
+
+// Marca el mensaje como leído y muestra "escribiendo…" al cliente mientras el
+// bot prepara la respuesta (se quita solo al enviar o a los ~25 s). Best effort.
+export async function sendTypingIndicator(
+  phoneNumberId: string,
+  accessToken: string,
+  messageId: string,
+): Promise<void> {
+  try {
+    await fetch(`${GRAPH_API_BASE}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+        typing_indicator: { type: "text" },
+      }),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // No es crítico: si falla, el cliente simplemente no ve "escribiendo…".
+  }
+}

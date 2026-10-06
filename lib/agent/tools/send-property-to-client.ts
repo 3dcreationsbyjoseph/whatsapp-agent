@@ -33,6 +33,8 @@ export function makeSendPropertyToClientTool(ctx: {
   phone_number_id: string;
   access_token: string;
   plan: PlanFeatures;
+  // Idioma del cliente decidido en código (prioritario sobre lo que diga el modelo).
+  reply_language?: string | null;
 }) {
   return tool({
     description:
@@ -98,8 +100,8 @@ export function makeSendPropertyToClientTool(ctx: {
         // Al idioma del cliente (los datos salen del catálogo; el modelo solo traduce).
         const ficha = await translateForClient(
           fichaEs,
-          caption_language
-            ? { language: caption_language }
+          ctx.reply_language || caption_language
+            ? { language: ctx.reply_language || caption_language }
             : { sample: await clientLanguageSample(ctx.conversation_id) },
           ctx.plan,
         );

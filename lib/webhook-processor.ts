@@ -3,7 +3,9 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
-import { sendWhatsAppText } from "@/lib/whatsapp/send";
+import { sendTypingIndicator, sendWhatsAppText } from "@/lib/whatsapp/send";
+import { detectLanguageLocal } from "@/lib/lang-detect";
+import { allowedLanguage } from "@/lib/billing/plans";
 import { runAgent } from "@/lib/agent/run-agent";
 import { buildContactContext, type LeadSummary } from "@/lib/agent/system-prompt";
 import { FICHA_PREFIX, parseFicha } from "@/lib/agent/tools/send-property-to-client";
@@ -60,13 +62,14 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
 
       const { data: org } = await admin
         .from("organizations")
-        .select("timezone")
+        .select("timezone, name")
         .eq("id", organization_id)
         .single();
       const timezone = org?.timezone ?? DEFAULT_TIMEZONE;
 
       for (const m of change.value.messages ?? []) {
         if (m.type !== "text" || !m.text) continue;
+        const receivedAt = Date.now();
 
         // Upsert contact
         const { data: contact } = await admin
@@ -133,8 +136,74 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
 
         if (!conv.bot_active) continue;
 
+        const accessToken = decrypt(wa.access_token_encrypted);
+
+        // Todo lo que necesita el agente, en paralelo (antes eran ~10 consultas en serie).
+        type Prop = { title: string; reference: string | null };
+        const [
+          billing,
+          { count: olderContacts },
+          { data: agentCfg },
+          { data: gcalRow },
+          { data: history },
+          { data: lead },
+          { data: fichas },
+          { data: visits },
+        ] = await Promise.all([
+          getOrgBilling(organization_id),
+          admin
+            .from("contacts")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", organization_id)
+            .lt("created_at", contact.created_at),
+          admin
+            .from("agent_configs")
+            .select("system_prompt, tone, business_info, services, business_hours, handoff_message")
+            .eq("organization_id", organization_id)
+            .single(),
+          admin
+            .from("google_calendar_configs")
+            .select("organization_id, calendar_id, refresh_token_encrypted, access_token_encrypted, token_expires_at")
+            .eq("organization_id", organization_id)
+            .maybeSingle(),
+          // Últimos 20 mensajes (evita que un historial largo confunda al modelo).
+          admin
+            .from("messages")
+            .select("direction, sender, content, created_at")
+            .eq("conversation_id", conv.id)
+            .order("created_at", { ascending: false })
+            .limit(20),
+          // Lo ya sabido del cliente (el historial que ve el modelo es corto):
+          // criterios del lead, fichas enviadas y visitas próximas.
+          admin
+            .from("leads")
+            .select(
+              "budget_min_eur, budget_max_eur, preferred_locations, preferred_types, min_bedrooms, min_bathrooms, needs_pool, needs_sea_view, timeline, financing, language, notes",
+            )
+            .eq("organization_id", organization_id)
+            .eq("contact_id", contact.id)
+            .maybeSingle<LeadSummary>(),
+          admin
+            .from("messages")
+            .select("content")
+            .eq("conversation_id", conv.id)
+            .eq("direction", "outbound")
+            .like("content", `${FICHA_PREFIX}%`)
+            .order("created_at", { ascending: true })
+            .limit(50),
+          admin
+            .from("appointments")
+            .select("starts_at, visit_type, property:properties(title, reference)")
+            .eq("organization_id", organization_id)
+            .eq("contact_id", contact.id)
+            .eq("status", "confirmed")
+            .gte("starts_at", new Date().toISOString())
+            .order("starts_at", { ascending: true })
+            .limit(5)
+            .returns<Array<{ starts_at: string; visit_type: string | null; property: Prop | Prop[] | null }>>(),
+        ]);
+
         // Sin prueba vigente ni suscripción activa: guardamos el mensaje pero no respondemos.
-        const billing = await getOrgBilling(organization_id);
         if (!billing.hasAccess) {
           console.log(
             JSON.stringify({
@@ -152,51 +221,46 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         // Si la agencia borra clientes, los siguientes vuelven a recibir respuesta.
         // El mensaje queda guardado igualmente (el equipo lo ve en el panel).
         const plan = billing.plan;
-        if (plan.maxContacts != null) {
-          const { count: olderContacts } = await admin
-            .from("contacts")
-            .select("id", { count: "exact", head: true })
-            .eq("organization_id", organization_id)
-            .lt("created_at", contact.created_at);
-          if ((olderContacts ?? 0) >= plan.maxContacts) {
-            console.log(
-              JSON.stringify({
-                level: "info",
-                msg: "agent skipped: plan contact limit",
-                organization_id,
-                wa_message_id: m.id,
-                plan: plan.id,
-                max_contacts: plan.maxContacts,
-              }),
-            );
-            continue;
-          }
+        if (plan.maxContacts != null && (olderContacts ?? 0) >= plan.maxContacts) {
+          console.log(
+            JSON.stringify({
+              level: "info",
+              msg: "agent skipped: plan contact limit",
+              organization_id,
+              wa_message_id: m.id,
+              plan: plan.id,
+              max_contacts: plan.maxContacts,
+            }),
+          );
+          continue;
         }
+
+        // "Escribiendo…" en el móvil del cliente mientras se prepara la respuesta.
+        const typing = sendTypingIndicator(wa.phone_number_id, accessToken, m.id);
+
+        // Idioma de la respuesta, decidido en código (sin IA): el del mensaje si se
+        // reconoce; si no (p. ej. "ok", "Una villa"), el último conocido del cliente.
+        // Si el plan no incluye ese idioma, se responde en inglés.
+        const detected = detectLanguageLocal(m.text.body);
+        const clientLanguage = detected ?? lead?.language ?? null;
+        const replyLanguage = clientLanguage ? allowedLanguage(clientLanguage, plan) : null;
+        const languageOutOfPlan = !!clientLanguage && replyLanguage !== clientLanguage;
+        // Se recuerda el idioma del cliente para próximos mensajes (en paralelo).
+        const saveLanguage =
+          detected && detected !== lead?.language
+            ? admin
+                .from("leads")
+                .upsert(
+                  { organization_id, contact_id: contact.id, language: detected },
+                  { onConflict: "organization_id,contact_id", ignoreDuplicates: false },
+                )
+                .then(() => undefined)
+            : Promise.resolve();
 
         // Ejecutar agente
         try {
-          const { data: agentCfg } = await admin
-            .from("agent_configs")
-            .select("system_prompt, tone, business_info, services, business_hours, handoff_message")
-            .eq("organization_id", organization_id)
-            .single();
           if (!agentCfg) continue;
-
-          const { data: gcalRow } = await admin
-            .from("google_calendar_configs")
-            .select("organization_id, calendar_id, refresh_token_encrypted, access_token_encrypted, token_expires_at")
-            .eq("organization_id", organization_id)
-            .maybeSingle();
           const gcal: GCalConfig | null = gcalRow ?? null;
-
-          // Últimos 20 mensajes en orden ascendente (evita que un historial largo
-          // confunda al modelo con contexto viejo tras completar acciones).
-          const { data: history } = await admin
-            .from("messages")
-            .select("direction, sender, content, created_at")
-            .eq("conversation_id", conv.id)
-            .order("created_at", { ascending: false })
-            .limit(20);
 
           // Fuera del historial: logs "[debug]" (no son mensajes) y las URLs de
           // cada foto, que se resumen en una línea "[N fotos enviadas]".
@@ -223,43 +287,6 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           }
           flushPhotos();
 
-          const { data: orgRow } = await admin
-            .from("organizations")
-            .select("name")
-            .eq("id", organization_id)
-            .single();
-
-          // Lo ya sabido del cliente (el historial que ve el modelo es corto):
-          // criterios del lead, fichas enviadas y visitas próximas.
-          type Prop = { title: string; reference: string | null };
-          const [{ data: lead }, { data: fichas }, { data: visits }] = await Promise.all([
-            admin
-              .from("leads")
-              .select(
-                "budget_min_eur, budget_max_eur, preferred_locations, preferred_types, min_bedrooms, min_bathrooms, needs_pool, needs_sea_view, timeline, financing, language, notes",
-              )
-              .eq("organization_id", organization_id)
-              .eq("contact_id", contact.id)
-              .maybeSingle<LeadSummary>(),
-            admin
-              .from("messages")
-              .select("content")
-              .eq("conversation_id", conv.id)
-              .eq("direction", "outbound")
-              .like("content", `${FICHA_PREFIX}%`)
-              .order("created_at", { ascending: true })
-              .limit(50),
-            admin
-              .from("appointments")
-              .select("starts_at, visit_type, property:properties(title, reference)")
-              .eq("organization_id", organization_id)
-              .eq("contact_id", contact.id)
-              .eq("status", "confirmed")
-              .gte("starts_at", new Date().toISOString())
-              .order("starts_at", { ascending: true })
-              .limit(5)
-              .returns<Array<{ starts_at: string; visit_type: string | null; property: Prop | Prop[] | null }>>(),
-          ]);
           const sentProperties = new Map<string, Prop>();
           for (const f of fichas ?? []) {
             const p = parseFicha(f.content);
@@ -277,13 +304,14 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           const start = Date.now();
           const { text } = await runAgent({
             organization_id,
-            organization_name: orgRow?.name ?? "",
+            organization_name: org?.name ?? "",
             timezone,
             conversation_id: conv.id,
             contact_id: contact.id,
             contact_phone: m.from,
             phone_number_id: wa.phone_number_id,
-            access_token: decrypt(wa.access_token_encrypted),
+            access_token: accessToken,
+            reply_language: replyLanguage,
             agent_config: agentCfg,
             gcal_config: gcal,
             plan,
@@ -299,6 +327,9 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               lead: lead ?? null,
               sent_properties: [...sentProperties.values()],
               upcoming_visits: upcomingVisits,
+              reply_language: replyLanguage,
+              client_language: clientLanguage,
+              language_out_of_plan: languageOutOfPlan,
             }),
           });
           const latency_ms = Date.now() - start;
@@ -310,7 +341,6 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .eq("id", conv.id)
             .single();
 
-          const accessToken = decrypt(wa.access_token_encrypted);
           // Si hubo handoff en este turno se envía siempre el mensaje configurado
           // en Personalización (no el texto libre del modelo).
           const handedOff = convAfter ? !convAfter.bot_active : false;
@@ -322,7 +352,11 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .map((h) => h.content)
             .join("\n");
           const reply = handedOff
-            ? await translateForClient(agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE, { sample: clientSample }, plan)
+            ? await translateForClient(
+                agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE,
+                replyLanguage ? { language: replyLanguage } : { sample: clientSample },
+                plan,
+              )
             : text?.trim() ?? "";
 
           if (reply) {
@@ -334,6 +368,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
                 JSON.stringify({
                   level: "error",
                   msg: "outbound send failed",
+                  total_ms: Date.now() - receivedAt,
                   organization_id,
                   wa_message_id: m.id,
                   err: send.error,
@@ -356,6 +391,8 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               .eq("id", conv.id);
           }
 
+          await Promise.all([typing, saveLanguage]);
+
           console.log(
             JSON.stringify({
               level: "info",
@@ -363,6 +400,8 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               organization_id,
               wa_message_id: m.id,
               latency_ms,
+              total_ms: Date.now() - receivedAt,
+              reply_language: replyLanguage,
               replied: reply.length > 0,
             }),
           );
