@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { login } from "./actions";
 
-export default function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; next?: string }> }) {
+type Params = { error?: string; message?: string; next?: string };
+
+export default function LoginPage({ searchParams }: { searchParams: Promise<Params> }) {
   return <LoginForm searchParams={searchParams} />;
 }
 
-async function LoginForm({ searchParams }: { searchParams: Promise<{ error?: string; next?: string }> }) {
+async function LoginForm({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams;
   return (
     <main className="min-h-screen flex items-center justify-center p-8">
@@ -29,6 +31,7 @@ async function LoginForm({ searchParams }: { searchParams: Promise<{ error?: str
             placeholder="Contraseña"
             className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-white/40"
           />
+          {params.message ? <p className="text-sm text-emerald-400">{params.message}</p> : null}
           {params.error ? <p className="text-sm text-red-400">{params.error}</p> : null}
           <button
             type="submit"
