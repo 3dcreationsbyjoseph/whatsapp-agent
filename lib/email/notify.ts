@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { readMetadata, cleanName } from "@/lib/contact-info";
 import type { GCalConfig } from "@/lib/google/calendar";
 import { sendGmail } from "./gmail";
+import { detectLanguageLocal } from "@/lib/lang-detect";
 import { getOrgBilling } from "@/lib/billing/access";
 import { clientLanguageSample, isSpanishCode, translateForClient } from "@/lib/agent/translate";
 
@@ -28,12 +29,18 @@ function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
       ? "Si surgiera cualquier problema o cambio, le avisaremos lo antes posible por WhatsApp o por este correo."
       : "Should any problem or change arise, we will let you know as soon as possible via WhatsApp or this email.";
   const sign = lang === "es" ? `Un saludo,\n${org}` : `Kind regards,\n${org}`;
+  // Por qué recibe el correo: los filtros (y las personas) se fían más de un
+  // email que explica su origen y a qué responder.
+  const footer =
+    lang === "es"
+      ? `Recibe este correo porque ha contactado con ${org} por WhatsApp. Puede responder a este email o escribirnos por WhatsApp.`
+      : `You are receiving this email because you contacted ${org} on WhatsApp. You can reply to this email or message us on WhatsApp.`;
 
   let subject: string;
   let lines: string[];
   switch (e.kind) {
     case "visit_booked":
-      subject = lang === "es" ? `Hemos recibido su solicitud de visita — ${org}` : `We have received your viewing request — ${org}`;
+      subject = lang === "es" ? `Confirmación de su visita: ${e.when}` : `Your viewing is confirmed: ${e.when}`;
       lines =
         lang === "es"
           ? [
@@ -48,14 +55,14 @@ function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
             ];
       break;
     case "visit_cancelled":
-      subject = lang === "es" ? `Su cita ha sido cancelada — ${org}` : `Your appointment has been cancelled — ${org}`;
+      subject = lang === "es" ? `Visita cancelada: ${e.when}` : `Viewing cancelled: ${e.when}`;
       lines =
         lang === "es"
           ? [`Le confirmamos que su cita del ${e.when}${e.property ? ` (${e.property})` : ""} ha quedado cancelada.`, "Si desea una nueva fecha, escríbanos por WhatsApp."]
           : [`We confirm that your appointment on ${e.when}${e.property ? ` (${e.property})` : ""} has been cancelled.`, "If you would like a new date, just message us on WhatsApp."];
       break;
     case "visit_rescheduled":
-      subject = lang === "es" ? `Su cita ha sido modificada — ${org}` : `Your appointment has been changed — ${org}`;
+      subject = lang === "es" ? `Cambio de su visita: ${e.when}` : `Your viewing has been changed: ${e.when}`;
       lines =
         lang === "es"
           ? [
@@ -72,7 +79,7 @@ function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
             ];
       break;
     case "request_received":
-      subject = lang === "es" ? `Hemos recibido su solicitud — ${org}` : `We have received your request — ${org}`;
+      subject = lang === "es" ? `${org}: hemos recibido su solicitud` : `${org}: we have received your request`;
       lines =
         lang === "es"
           ? ["Hemos recibido su solicitud:", `• ${e.summary}`, "Nos pondremos en contacto con usted en breve."]
@@ -80,14 +87,8 @@ function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
       break;
   }
 
-  const text = [hi, "", ...lines, "", problems, "", sign].join("\n");
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#111">
-<p>${esc(hi)}</p>
-${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
-<p style="margin-top:16px">${esc(problems)}</p>
-<p style="margin-top:16px">${esc(sign).replace(/\n/g, "<br>")}</p>
-</div>`;
-  return { subject, text, html };
+  const text = [hi, "", ...lines, "", problems, "", sign, "", "--", footer].join("\n");
+  return { subject, text, html: textToHtml(text, subject, lang) };
 }
 
 // Cada email enviado deja un mensaje "[email] Enviado a ..." en la conversación.
@@ -120,12 +121,27 @@ function sanitizeSummary(summary: string): string {
 }
 
 // HTML del email a partir del texto ya traducido (párrafos separados por línea en blanco).
-function textToHtml(text: string): string {
-  const paragraphs = text
+// Documento HTML completo (doctype, idioma, título): los correos con solo un
+// fragmento <div> puntúan peor en los filtros antispam. El pie (tras "--") va
+// en gris y más pequeño.
+function textToHtml(text: string, subject: string, lang: string): string {
+  const [body, footer] = text.split(/\n--\n/);
+  const paragraphs = body
     .split(/\n\s*\n/)
     .map((p) => `<p style="margin:8px 0">${esc(p.trim()).replace(/\n/g, "<br>")}</p>`)
     .join("\n");
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#111">\n${paragraphs}\n</div>`;
+  const foot = footer
+    ? `\n<hr style="border:none;border-top:1px solid #ddd;margin:20px 0 10px">\n<p style="margin:0;font-size:12px;color:#777">${esc(footer.trim())}</p>`
+    : "";
+  return `<!DOCTYPE html>
+<html lang="${esc(lang)}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(subject)}</title></head>
+<body style="margin:0;padding:24px;background:#ffffff">
+<div style="max-width:560px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#111">
+${paragraphs}${foot}
+</div>
+</body>
+</html>`;
 }
 
 export async function notifyClientByEmail(params: {
@@ -181,7 +197,12 @@ export async function notifyClientByEmail(params: {
       translateForClient(es.subject, target, plan),
       translateForClient(es.text, target, plan),
     ]);
-    const html = text === es.text ? es.html : textToHtml(text);
+    const langCode = (
+      ("language" in target && target.language) ||
+      ("sample" in target && detectLanguageLocal(target.sample)) ||
+      "es"
+    ).split("-")[0];
+    const html = text === es.text ? es.html : textToHtml(text, subject, langCode);
 
     // Límites anti-spam: el email lo da el propio cliente (sin verificar), así que
     // sin tope se podría usar el Gmail de la agencia para mandar spam a terceros.
@@ -248,7 +269,7 @@ export async function notifyClientByEmail(params: {
     }
 
     try {
-      await sendGmail(gcal, { to, fromName: orgName, subject, text, html });
+      await sendGmail(gcal, { to, fromName: orgName, subject, text, html, language: langCode });
     } catch (err) {
       await release();
       throw err;
