@@ -49,31 +49,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
 
-  const phoneNumberId: string | undefined =
-    payload?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
-  if (!phoneNumberId) {
+  // Todos los phone_number_id del payload (no solo el primero): processWebhook
+  // procesa cada entry/change, así que la firma debe valer para TODAS las orgs
+  // implicadas. Si no, una org podría firmar con su secret y colar mensajes de otra.
+  const phoneNumberIds = new Set<string>();
+  for (const entry of payload?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      const id = change?.value?.metadata?.phone_number_id;
+      if (typeof id === "string" && id) phoneNumberIds.add(id);
+    }
+  }
+  if (phoneNumberIds.size === 0) {
     // Meta también manda eventos de estado sin messages — ack 200 y salir.
     return new Response("OK", { status: 200 });
   }
 
   const admin = createAdminClient();
-  const { data: wa } = await admin
+  const { data: configs } = await admin
     .from("whatsapp_configs")
-    .select("app_secret_encrypted, organization_id")
-    .eq("phone_number_id", phoneNumberId)
-    .maybeSingle();
+    .select("app_secret_encrypted, organization_id, phone_number_id")
+    .in("phone_number_id", [...phoneNumberIds]);
 
-  if (!wa) {
-    console.warn(JSON.stringify({ level: "warn", msg: "phone_number_id no registrado", phoneNumberId }));
+  if (!configs || configs.length === 0) {
+    console.warn(
+      JSON.stringify({ level: "warn", msg: "phone_number_id no registrado", phoneNumberIds: [...phoneNumberIds] }),
+    );
     // 200 igualmente para que Meta no reintente indefinidamente.
     return new Response("OK", { status: 200 });
   }
 
-  const appSecret = decrypt(wa.app_secret_encrypted);
-  const valid = verifyMetaSignature(raw, signature, appSecret);
-  if (!valid) {
-    console.error(JSON.stringify({ level: "error", msg: "firma inválida", phoneNumberId }));
-    return new Response("Forbidden", { status: 403 });
+  // Los no registrados los ignora processWebhook; los registrados deben validar la firma.
+  for (const wa of configs) {
+    const appSecret = decrypt(wa.app_secret_encrypted);
+    if (!verifyMetaSignature(raw, signature, appSecret)) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          msg: "firma inválida",
+          phoneNumberId: wa.phone_number_id,
+          organization_id: wa.organization_id,
+        }),
+      );
+      return new Response("Forbidden", { status: 403 });
+    }
   }
 
   // Procesa en background: Meta reintenta hasta 7 días si tardas.
