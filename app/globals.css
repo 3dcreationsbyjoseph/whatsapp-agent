@@ -1,15 +1,12 @@
 @import "tailwindcss";
 
+/* Toda la interfaz está diseñada en oscuro (inputs bg-neutral-900, etc.).
+   Antes los colores seguían el tema del sistema: en modo claro el texto
+   salía oscuro sobre inputs oscuros y no se veía lo que se escribía. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  color-scheme: dark;
 }
 
 body {
