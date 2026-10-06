@@ -89,6 +89,28 @@ ${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
   return { subject, text, html };
 }
 
+// Cada email enviado deja un mensaje "[email] Enviado a ..." en la conversación;
+// se usa también para contar envíos (límites anti-spam).
+const EMAIL_LOG_PREFIX = "[email] ";
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_EMAILS_PER_CONVERSATION_PER_DAY = 5;
+const MAX_EMAILS_PER_ORG_PER_DAY = 200;
+const MAX_SUMMARY_LENGTH = 300;
+
+// El resumen de la petición lo redacta la IA a partir de lo que escribe el
+// cliente: sin enlaces, emails ni teléfonos, y con longitud acotada.
+function sanitizeSummary(summary: string): string {
+  const clean = summary
+    .replace(/\bhttps?:\/\/\S+|\bwww\.\S+/gi, "")
+    .replace(/[^\s@]+@[^\s@]+\.[a-z]{2,}/gi, "")
+    // Teléfonos con prefijo internacional (no toca precios como "1.500.000 €").
+    .replace(/(?:\+|\b00)\d[\d\s().-]{7,}\d/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const short = clean.length > MAX_SUMMARY_LENGTH ? `${clean.slice(0, MAX_SUMMARY_LENGTH - 1).trimEnd()}…` : clean;
+  return short || "Su solicitud";
+}
+
 // HTML del email a partir del texto ya traducido (párrafos separados por línea en blanco).
 function textToHtml(text: string): string {
   const paragraphs = text
@@ -128,9 +150,38 @@ export async function notifyClientByEmail(params: {
     if (!to) return { sent: false, reason: "El cliente no ha dado su email." };
     if (!gcal) return { sent: false, reason: "Google no está conectado (Integraciones)." };
 
+    // Límite de envíos: el email lo da el propio cliente (sin verificar), así que
+    // sin tope se podría usar el Gmail de la agencia para mandar spam a terceros.
+    const since = new Date(Date.now() - DAY_MS).toISOString();
+    const [{ count: convCount }, { count: orgCount }] = await Promise.all([
+      admin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversation_id)
+        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .gte("created_at", since),
+      admin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organization_id)
+        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .gte("created_at", since),
+    ]);
+    if ((convCount ?? 0) >= MAX_EMAILS_PER_CONVERSATION_PER_DAY) {
+      return { sent: false, reason: "Límite de emails a este cliente alcanzado por hoy. No prometas más emails; confírmaselo por WhatsApp." };
+    }
+    if ((orgCount ?? 0) >= MAX_EMAILS_PER_ORG_PER_DAY) {
+      console.warn(JSON.stringify({ level: "warn", msg: "org daily email limit reached", organization_id }));
+      return { sent: false, reason: "Límite diario de emails de la agencia alcanzado. Confírmaselo por WhatsApp." };
+    }
+
     const orgName = org?.name ?? "";
     const firstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
-    const es = template(params.email, "es", firstName, orgName);
+    const email: EmailKind =
+      params.email.kind === "request_received"
+        ? { kind: "request_received", summary: sanitizeSummary(params.email.summary) }
+        : params.email;
+    const es = template(email, "es", firstName, orgName);
 
     // Se escribe en español y se traduce al idioma de los mensajes del cliente
     // (leads.language vale 'es' por defecto aunque el cliente escriba en otro idioma).
@@ -154,7 +205,7 @@ export async function notifyClientByEmail(params: {
       wa_message_id: null,
       direction: "outbound",
       sender: "bot",
-      content: `[email] Enviado a ${to}: ${subject}`,
+      content: `${EMAIL_LOG_PREFIX}Enviado a ${to}: ${subject}`,
       raw: null,
     });
     return { sent: true, to };
