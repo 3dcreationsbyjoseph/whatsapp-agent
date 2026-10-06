@@ -89,8 +89,10 @@ ${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
   return { subject, text, html };
 }
 
-// Cada email enviado deja un mensaje "[email] Enviado a ..." en la conversación;
-// se usa también para contar envíos (límites anti-spam).
+// Cada email enviado deja un mensaje "[email] Enviado a ..." en la conversación.
+// Para contar envíos (límites anti-spam) se usa raw.email_kind en mensajes
+// salientes del bot, NO el texto: un cliente puede escribir "[email] ..." por
+// WhatsApp, pero no puede crear mensajes del bot ni poner raw.email_kind.
 const EMAIL_LOG_PREFIX = "[email] ";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_EMAILS_PER_CONVERSATION_PER_DAY = 5;
@@ -205,7 +207,9 @@ export async function notifyClientByEmail(params: {
         .from("messages")
         .select("id", { count: "exact", head: true })
         .eq("conversation_id", conversation_id)
-        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .eq("direction", "outbound")
+        .eq("sender", "bot")
+        .not("raw->>email_kind", "is", null)
         .gte("created_at", since),
       // Tope general (todos los tipos), más alto: acota el abuso con muchos números
       // reservando/cancelando en bucle, sin bloquear el uso normal.
@@ -213,7 +217,9 @@ export async function notifyClientByEmail(params: {
         .from("messages")
         .select("id", { count: "exact", head: true })
         .eq("organization_id", organization_id)
-        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .eq("direction", "outbound")
+        .eq("sender", "bot")
+        .not("raw->>email_kind", "is", null)
         .gte("created_at", since),
       // El tope por agencia solo cuenta los acuses de solicitud (el tipo abusable):
       // así nadie puede agotarlo y bloquear las confirmaciones de visitas reales.
@@ -222,6 +228,8 @@ export async function notifyClientByEmail(params: {
             .from("messages")
             .select("id", { count: "exact", head: true })
             .eq("organization_id", organization_id)
+            .eq("direction", "outbound")
+            .eq("sender", "bot")
             .eq("raw->>email_kind", "request_received")
             .gte("created_at", since)
         : Promise.resolve({ count: 0 }),
