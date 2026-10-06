@@ -56,7 +56,13 @@ export async function POST(req: Request) {
   for (const entry of payload?.entry ?? []) {
     for (const change of entry?.changes ?? []) {
       const id = change?.value?.metadata?.phone_number_id;
-      if (typeof id === "string" && id) phoneNumberIds.add(id);
+      if (id == null) continue;
+      // Meta siempre lo manda como string. Otro tipo (p. ej. número) se saltaría
+      // esta verificación pero processWebhook lo usaría igual en la consulta: rechazar.
+      if (typeof id !== "string" || !id) {
+        return new Response("Bad Request", { status: 400 });
+      }
+      phoneNumberIds.add(id);
     }
   }
   if (phoneNumberIds.size === 0) {
