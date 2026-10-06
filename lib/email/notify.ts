@@ -201,7 +201,11 @@ export async function notifyClientByEmail(params: {
       ("language" in target && target.language) ||
       ("sample" in target && detectLanguageLocal(target.sample)) ||
       "es"
-    ).split("-")[0];
+    )
+      .split("-")[0]
+      .toLowerCase()
+      .replace(/[^a-z]/g, "")
+      .slice(0, 3) || "es";
     const html = text === es.text ? es.html : textToHtml(text, subject, langCode);
 
     // Límites anti-spam: el email lo da el propio cliente (sin verificar), así que

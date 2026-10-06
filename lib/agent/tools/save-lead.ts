@@ -85,7 +85,10 @@ export function makeSaveLeadTool(ctx: { organization_id: string; contact_id: str
         if (args.needs_sea_view != null) patch.needs_sea_view = args.needs_sea_view;
         if (args.timeline) patch.timeline = args.timeline;
         if (args.financing) patch.financing = args.financing;
-        if (args.language) patch.language = args.language;
+        // Solo códigos de idioma válidos (lo redacta el modelo a partir del chat).
+        if (args.language && /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i.test(args.language.trim())) {
+          patch.language = args.language.trim().toLowerCase();
+        }
         if (args.qualified != null) patch.qualified = args.qualified;
         if (args.note?.trim()) {
           const n = args.note.trim();
