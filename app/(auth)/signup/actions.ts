@@ -18,7 +18,8 @@ export async function signup(formData: FormData) {
     password,
     options: {
       data: { full_name, organization_name },
-      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+      // El grupo (auth) no forma parte de la URL: la ruta es /callback.
+      emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/callback`,
     },
   });
 
