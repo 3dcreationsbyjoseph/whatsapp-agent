@@ -251,42 +251,58 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         // Notas de voz: solo el plan Max las transcribe (Google Speech-to-Text).
         let voiceStatus: "transcribed" | "unavailable" | null = null;
         let voiceLanguage: string | null = null;
+        let voiceLanguageConfident = false;
         if (isVoice) {
           voiceStatus = "unavailable";
           if (plan.audio && speechEnabled()) {
             try {
-              // Límite de coste: el abanico de idiomas (19 transcripciones) como mucho
-              // 3 veces al día por conversación y 100 por agencia.
-              const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-              const [{ count: convFanouts }, { count: orgFanouts }] = await Promise.all([
+              // Límite de coste del abanico de idiomas (19 transcripciones): como mucho
+              // 3 al día por conversación y 100 por agencia. Se RESERVA marcando antes
+              // este mensaje y contando después (incluyéndolo): dos notas simultáneas
+              // no pueden saltarse el tope. Si la cuenta falla, NO se permite.
+              const markFanout = (on: boolean) =>
                 admin
                   .from("messages")
-                  .select("id", { count: "exact", head: true })
-                  .eq("conversation_id", conv.id)
-                  .eq("raw->>stt_fanout", "true")
-                  .gte("created_at", since),
-                admin
-                  .from("messages")
-                  .select("id", { count: "exact", head: true })
-                  .eq("organization_id", organization_id)
-                  .eq("raw->>stt_fanout", "true")
-                  .gte("created_at", since),
-              ]);
+                  .update({ raw: { ...(m as unknown as Record<string, unknown>), ...(on ? { stt_fanout: true } : {}) } as Json })
+                  .eq("wa_message_id", m.id)
+                  .eq("organization_id", organization_id);
+              const reserveFanout = async (): Promise<boolean> => {
+                const { error: markErr } = await markFanout(true);
+                if (markErr) return false;
+                const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+                const [convRes, orgRes] = await Promise.all([
+                  admin
+                    .from("messages")
+                    .select("id", { count: "exact", head: true })
+                    .eq("conversation_id", conv.id)
+                    .eq("raw->>stt_fanout", "true")
+                    .gte("created_at", since),
+                  admin
+                    .from("messages")
+                    .select("id", { count: "exact", head: true })
+                    .eq("organization_id", organization_id)
+                    .eq("raw->>stt_fanout", "true")
+                    .gte("created_at", since),
+                ]);
+                const ok =
+                  !convRes.error && !orgRes.error &&
+                  convRes.count != null && orgRes.count != null &&
+                  convRes.count <= 3 && orgRes.count <= 100;
+                if (!ok) await markFanout(false);
+                return ok;
+              };
               const bytes = await downloadWhatsAppMedia(m.audio!.id, accessToken);
-              const tr = await transcribeVoiceNote(bytes, lead?.language, {
-                allowFanout: (convFanouts ?? 0) < 3 && (orgFanouts ?? 0) < 100,
-              });
+              const tr = await transcribeVoiceNote(bytes, lead?.language, { reserveFanout });
               if (tr) {
                 incomingText = tr.text;
+                // Solo se recuerda el idioma si hay pruebas (no por un "Hello" suelto).
                 voiceLanguage = tr.language;
+                voiceLanguageConfident = tr.confidentLanguage;
                 voiceStatus = "transcribed";
                 // El panel muestra la transcripción en la conversación.
                 await admin
                   .from("messages")
-                  .update({
-                    content: `🎤 ${tr.text}`,
-                    ...(tr.fannedOut ? { raw: { ...(m as unknown as Record<string, unknown>), stt_fanout: true } as Json } : {}),
-                  })
+                  .update({ content: `🎤 ${tr.text}` })
                   .eq("wa_message_id", m.id)
                   .eq("organization_id", organization_id);
               }
@@ -307,7 +323,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         const languageOutOfPlan = !!clientLanguage && replyLanguage !== clientLanguage;
         // Se recuerda el idioma del cliente para próximos mensajes (en paralelo).
         const saveLanguage =
-          detected && detected !== lead?.language
+          detected && detected !== lead?.language && (!isVoice || voiceLanguageConfident)
             ? admin
                 .from("leads")
                 .upsert(
