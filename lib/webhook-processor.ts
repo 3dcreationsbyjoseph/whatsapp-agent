@@ -12,7 +12,8 @@ import { buildContactContext, type LeadSummary } from "@/lib/agent/system-prompt
 import { FICHA_PREFIX, parseFicha } from "@/lib/agent/tools/send-property-to-client";
 import { visitLabel } from "@/lib/agent/tools/list-upcoming-appointments";
 import { translateForClient } from "@/lib/agent/translate";
-import { cleanName, hasFullName, isRealName, readMetadata } from "@/lib/contact-info";
+import { cleanName, hasFullName, isRealName, normalizeEmail, readMetadata } from "@/lib/contact-info";
+import { notifyClientByEmail } from "@/lib/email/notify";
 import { DEFAULT_TIMEZONE, formatInTz } from "@/lib/format-date";
 import type { Json } from "@/lib/database.types";
 import { getOrgBilling } from "@/lib/billing/access";
@@ -294,6 +295,47 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
                 .then(() => undefined)
             : Promise.resolve();
 
+        // Email del cliente detectado en código (el modelo a veces no llama a la tool):
+        // si escribe un email nuevo se guarda (sustituye al anterior) y, si tiene una
+        // visita próxima, se le envía la confirmación a esa dirección.
+        let emailNote: string | null = null;
+        const typedEmail = normalizeEmail(incomingText.match(/[^\s@<>()"',;:]+@[^\s@<>()"',;:]+\.[a-z]{2,}/i)?.[0]);
+        if (typedEmail && typedEmail !== contactMeta.email) {
+          const previous = contactMeta.email ?? null;
+          const metadata = { ...contactMeta, email: typedEmail };
+          delete (metadata as Record<string, unknown>).email_declined;
+          const { error: emailErr } = await admin
+            .from("contacts")
+            .update({ metadata: metadata as Json })
+            .eq("id", contact.id)
+            .eq("organization_id", organization_id);
+          if (!emailErr) {
+            Object.assign(contactMeta, metadata);
+            emailNote = previous
+              ? `Acaba de darte un email nuevo (${typedEmail}) y ya está guardado: SUSTITUYE al anterior (${previous}). Solo se guarda un email por cliente.`
+              : `Acaba de darte su email (${typedEmail}) y ya está guardado.`;
+            const next = (visits ?? [])[0];
+            if (next) {
+              const p = Array.isArray(next.property) ? next.property[0] : next.property;
+              const r = await notifyClientByEmail({
+                organization_id,
+                contact_id: contact.id,
+                conversation_id: conv.id,
+                gcal: gcalRow ?? null,
+                email: {
+                  kind: "visit_booked",
+                  when: formatInTz(next.starts_at, timezone, "long"),
+                  visit: visitLabel(next.visit_type),
+                  property: p ? (p.reference ? `${p.title} (Ref. ${p.reference})` : p.title) : null,
+                },
+              });
+              emailNote += r.sent
+                ? ` Se le ACABA DE ENVIAR la confirmación de su próxima visita a ${typedEmail}: díselo.`
+                : ` No se pudo enviar la confirmación por email (${r.reason}): no prometas emails.`;
+            }
+          }
+        }
+
         // Ejecutar agente
         try {
           if (!agentCfg) continue;
@@ -378,6 +420,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               client_language: clientLanguage,
               language_out_of_plan: languageOutOfPlan,
               voice_note: voiceStatus,
+              email_note: emailNote,
             }),
           });
           const latency_ms = Date.now() - start;

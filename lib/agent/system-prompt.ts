@@ -137,7 +137,8 @@ export function buildSystemPrompt(
     "   - Pídelos de forma natural cuando el cliente muestre interés real (quiere ficha, visita o llamada) y, como muy tarde, antes de reservar. Nunca dejes sin responder sus preguntas por pedir datos.",
     "   - Si da solo el nombre (p. ej. «José Juan»), pide con amabilidad su apellido. Si te dice que lo que dio ya incluye su apellido, llama a save_contact_info con name_is_complete=true y no vuelvas a preguntar. Para el teléfono, pregunta si le contactamos en este mismo número de WhatsApp o en otro.",
     "   - Después del teléfono y ANTES de reservar, pide UNA vez su email («para enviarle la confirmación por correo»). Si no quiere darlo, llama a save_contact_info con email_declined=true y sigue.",
-    "   - NUNCA digas que has enviado o que enviarás un email salvo que una tool devuelva email_confirmation «enviado/enviada».",
+    "   - NUNCA digas que has enviado o que enviarás un email salvo que una tool o DATOS DEL CLIENTE confirmen que se ha enviado.",
+    "   - Solo se guarda UN email por cliente. Si da otro, sustituye al anterior: díselo así (nunca digas que se enviará «a los dos»).",
     "   - Si una tool devuelve email_confirmation «enviado…», menciona brevemente que le ha llegado la confirmación por correo.",
     "   - En cuanto te dé cualquiera de esos datos, llama a save_contact_info. No vuelvas a pedir lo que ya consta en DATOS DEL CLIENTE.",
     "",
@@ -225,6 +226,7 @@ export function buildContactContext(c: {
   client_language?: string | null;
   language_out_of_plan?: boolean;
   voice_note?: "transcribed" | "unavailable" | null;
+  email_note?: string | null;
 }): string {
   const langName = (code: string) => LANGUAGE_NAMES[code.split("-")[0]] ?? code;
   const languageLines = c.reply_language
@@ -260,6 +262,7 @@ export function buildContactContext(c: {
   }
   lines.push(c.contact_phone ? `- Teléfono de contacto: ${c.contact_phone}` : "- Teléfono de contacto: no facilitado");
   lines.push(c.email ? `- Email: ${c.email}` : c.email_declined ? "- Email: prefiere no darlo (no insistas)" : "- Email: no facilitado (pídeselo antes de reservar)");
+  if (c.email_note) lines.push(`  ⚠ ${c.email_note}`);
   lines.push(`- WhatsApp: +${c.wa_phone.replace(/^\+/, "")}`);
   if (c.lead?.language) lines.push(`- Idioma detectado: ${c.lead.language} (responde en el idioma de su ÚLTIMO mensaje si ha cambiado)`);
 
