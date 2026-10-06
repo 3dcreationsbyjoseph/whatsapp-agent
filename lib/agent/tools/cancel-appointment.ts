@@ -14,7 +14,7 @@ export function makeCancelAppointmentTool(ctx: {
 }) {
   return tool({
     description:
-      "Cancela una cita existente. Marca la cita como cancelled en BD y borra el evento de Google Calendar. Usa antes list_upcoming_appointments para conocer el appointment_id correcto.",
+      "Cancela una cita existente. Marca la cita como cancelled en BD y borra el evento de Google Calendar. Usa antes list_upcoming_appointments para conocer el appointment_id correcto. Para CAMBIAR una cita de hora usa reschedule_appointment, no esta.",
     inputSchema: z.object({
       appointment_id: z.string().uuid().describe("UUID exacto devuelto por list_upcoming_appointments"),
     }),
@@ -36,10 +36,12 @@ export function makeCancelAppointmentTool(ctx: {
       }
 
       // Borra evento de Google Calendar si existe.
+      let google = appt.google_event_id && ctx.gcal ? "eliminado" : "sin evento en Google";
       if (appt.google_event_id && ctx.gcal) {
         try {
           await updateEventStatus(ctx.gcal, appt.google_event_id, "cancelled");
         } catch (err) {
+          google = "no se pudo eliminar de Google Calendar (la cita SÍ está cancelada en la agenda de la agencia)";
           console.error(
             JSON.stringify({
               level: "error",
@@ -74,6 +76,7 @@ export function makeCancelAppointmentTool(ctx: {
         service: appt.service,
         starts_at: appt.starts_at,
         local: formatInTz(appt.starts_at, ctx.timezone, "long"),
+        google_calendar: google,
         email_confirmation: emailResult.sent ? `enviado a ${emailResult.to}` : `no enviado: ${emailResult.reason}`,
       };
     },

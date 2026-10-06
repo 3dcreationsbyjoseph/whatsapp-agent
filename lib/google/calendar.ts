@@ -110,6 +110,13 @@ export async function createEvent(
   return data.id!;
 }
 
+// 404/410: el evento ya no existe en Google (borrado a mano, por ejemplo).
+function isGoneError(err: unknown): boolean {
+  const e = err as { code?: number | string; status?: number; response?: { status?: number } };
+  const status = Number(e?.response?.status ?? e?.status ?? e?.code);
+  return status === 404 || status === 410;
+}
+
 export async function updateEventStatus(
   config: GCalConfig,
   eventId: string,
@@ -117,7 +124,38 @@ export async function updateEventStatus(
 ) {
   const cal = calendarClient(config);
   if (status === "cancelled") {
-    await cal.events.delete({ calendarId: config.calendar_id, eventId });
+    try {
+      await cal.events.delete({ calendarId: config.calendar_id, eventId });
+    } catch (err) {
+      // Si ya no existe, el objetivo (que no esté en el calendario) se cumple.
+      if (!isGoneError(err)) throw err;
+    }
+  }
+}
+
+// Mueve un evento existente a otra hora (mismo evento, no se duplica).
+// Devuelve false si el evento ya no existe en Google.
+export async function moveEvent(
+  config: GCalConfig,
+  eventId: string,
+  args: { start: string; end: string; timezone: string; summary?: string; description?: string },
+): Promise<boolean> {
+  const cal = calendarClient(config);
+  try {
+    await cal.events.patch({
+      calendarId: config.calendar_id,
+      eventId,
+      requestBody: {
+        start: { dateTime: toLocalWallClockIso(args.start, args.timezone), timeZone: args.timezone },
+        end: { dateTime: toLocalWallClockIso(args.end, args.timezone), timeZone: args.timezone },
+        ...(args.summary ? { summary: args.summary } : {}),
+        ...(args.description ? { description: args.description } : {}),
+      },
+    });
+    return true;
+  } catch (err) {
+    if (isGoneError(err)) return false;
+    throw err;
   }
 }
 

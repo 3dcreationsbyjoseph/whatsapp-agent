@@ -11,6 +11,7 @@ import { sendGmail } from "./gmail";
 export type EmailKind =
   | { kind: "visit_booked"; when: string; visit: string; property?: string | null; location?: string | null }
   | { kind: "visit_cancelled"; when: string; property?: string | null }
+  | { kind: "visit_rescheduled"; previous: string; when: string; visit: string; property?: string | null }
   | { kind: "request_received"; summary: string };
 
 type Lang = "es" | "en";
@@ -50,6 +51,23 @@ function template(e: EmailKind, lang: Lang, name: string | null, org: string) {
         lang === "es"
           ? [`Le confirmamos que su cita del ${e.when}${e.property ? ` (${e.property})` : ""} ha quedado cancelada.`, "Si desea una nueva fecha, escríbanos por WhatsApp."]
           : [`We confirm that your appointment on ${e.when}${e.property ? ` (${e.property})` : ""} has been cancelled.`, "If you would like a new date, just message us on WhatsApp."];
+      break;
+    case "visit_rescheduled":
+      subject = lang === "es" ? `Su cita ha sido modificada — ${org}` : `Your appointment has been changed — ${org}`;
+      lines =
+        lang === "es"
+          ? [
+              "Le confirmamos el cambio de su cita:",
+              `• Antes: ${e.previous}`,
+              `• Ahora: ${e.visit}, ${e.when}`,
+              ...(e.property ? [`• Propiedad: ${e.property}`] : []),
+            ]
+          : [
+              "We confirm the change to your appointment:",
+              `• Previously: ${e.previous}`,
+              `• Now: ${e.visit}, ${e.when}`,
+              ...(e.property ? [`• Property: ${e.property}`] : []),
+            ];
       break;
     case "request_received":
       subject = lang === "es" ? `Hemos recibido su solicitud — ${org}` : `We have received your request — ${org}`;

@@ -9,6 +9,7 @@ import { makeCheckSlotAvailabilityTool } from "./tools/check-slot-availability";
 import { makeSaveContactInfoTool } from "./tools/save-contact-info";
 import { makeListUpcomingAppointmentsTool } from "./tools/list-upcoming-appointments";
 import { makeCancelAppointmentTool } from "./tools/cancel-appointment";
+import { makeRescheduleAppointmentTool } from "./tools/reschedule-appointment";
 import { makeSearchPropertiesTool } from "./tools/search-properties";
 import { makeSendPropertyToClientTool } from "./tools/send-property-to-client";
 import { makeSendMorePropertyPhotosTool } from "./tools/send-more-property-photos";
@@ -116,6 +117,15 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       conversation_id: input.conversation_id,
       timezone: input.timezone,
       gcal: input.gcal_config,
+    }),
+    reschedule_appointment: makeRescheduleAppointmentTool({
+      organization_id: input.organization_id,
+      contact_id: input.contact_id,
+      conversation_id: input.conversation_id,
+      contact_phone: input.contact_phone,
+      gcal: input.gcal_config,
+      timezone: input.timezone,
+      services,
     }),
     send_request_email: makeSendRequestEmailTool({
       organization_id: input.organization_id,
