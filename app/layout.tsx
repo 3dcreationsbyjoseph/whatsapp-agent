@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "WhatsApp Agent",
+  title: "EstateAI",
   description: "Agente IA de atención al cliente por WhatsApp",
 };
 

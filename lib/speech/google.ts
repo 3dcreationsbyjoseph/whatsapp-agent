@@ -67,7 +67,12 @@ type Transcript = { text: string; language: string | null; confidence: number };
 // Reconoce la nota en UN idioma concreto. (Las "alternativeLanguageCodes" de la
 // API no funcionan bien: con español como idioma principal, un audio en inglés
 // devolvía vacío. Por eso se prueba idioma a idioma.)
-async function recognizeIn(audio: Uint8Array, sampleRate: number, locale: string): Promise<Transcript | null> {
+async function recognizeIn(
+  audio: Uint8Array,
+  sampleRate: number,
+  locale: string,
+  allowLong = true,
+): Promise<Transcript | null> {
   const body = {
     config: {
       encoding: "OGG_OPUS",
@@ -92,6 +97,9 @@ async function recognizeIn(audio: Uint8Array, sampleRate: number, locale: string
   let data = await post("speech:recognize");
   // Notas de más de 1 minuto: reconocimiento asíncrono y espera del resultado.
   if (data.error && /too long|longrunning|duration/i.test(data.error.message ?? "")) {
+    // En el abanico de idiomas solo se usan notas cortas (síncronas): una nota
+    // larga x19 idiomas multiplicaría el coste.
+    if (!allowLong) return null;
     const op = await post("speech:longrunningrecognize");
     if (!op.name) throw new Error(op.error?.message ?? "No se pudo iniciar la transcripción larga");
     data = { results: [] };
@@ -161,10 +169,19 @@ async function pickBestCandidate(candidates: Transcript[]): Promise<Transcript> 
 // 1) Se prueba ese idioma (1 llamada, lo habitual) y se acepta si es claro y el
 //    texto parece de ese idioma. 2) Si no, se prueban en paralelo los idiomas
 //    habituales y se elige el candidato más coherente.
+// Límites de coste (una nota de voz la puede mandar cualquiera):
+// - notas de más de ~2 MB (~10 min) no se transcriben;
+// - el abanico de idiomas solo para notas cortas (~1 min) y si allowFanout
+//   (el webhook lo limita por conversación y por agencia y día).
+export const MAX_VOICE_BYTES = 2_000_000;
+const FANOUT_MAX_BYTES = 200_000;
+
 export async function transcribeVoiceNote(
   audio: Uint8Array,
   languageHint?: string | null,
-): Promise<{ text: string; language: string | null } | null> {
+  opts: { allowFanout?: boolean } = {},
+): Promise<{ text: string; language: string | null; fannedOut: boolean } | null> {
+  if (audio.length > MAX_VOICE_BYTES) return null;
   const rate = opusSampleRate(audio);
   const hint = (languageHint ?? "es").toLowerCase().split("-")[0];
 
@@ -175,17 +192,20 @@ export async function transcribeVoiceNote(
     detectLanguageLocal(first.text) === first.language &&
     first.text.split(/\s+/).length >= 3
   ) {
-    return { text: first.text, language: first.language };
+    return { text: first.text, language: first.language, fannedOut: false };
+  }
+  if (!opts.allowFanout || audio.length > FANOUT_MAX_BYTES) {
+    return first ? { text: first.text, language: first.language, fannedOut: false } : null;
   }
 
   const others = FALLBACK_LANGS.filter((l) => l !== hint);
-  const settled = await Promise.allSettled(others.map((l) => recognizeIn(audio, rate, sttLocale(l))));
+  const settled = await Promise.allSettled(others.map((l) => recognizeIn(audio, rate, sttLocale(l), false)));
   const candidates = [first, ...settled.map((r) => (r.status === "fulfilled" ? r.value : null))].filter(
     (c): c is Transcript => !!c,
   );
   if (candidates.length === 0) return null;
   const best = await pickBestCandidate(candidates);
-  return { text: best.text, language: best.language };
+  return { text: best.text, language: best.language, fannedOut: true };
 }
 
 // Limpia el texto para leerlo en voz alta: sin asteriscos, emojis ni enlaces.

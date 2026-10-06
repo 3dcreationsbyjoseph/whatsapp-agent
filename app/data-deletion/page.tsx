@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Eliminación de datos — WhatsApp Agent Miclinica",
+  title: "Eliminación de datos — EstateAI",
   description:
     "Instrucciones para solicitar la eliminación de tus datos personales del asistente virtual de WhatsApp.",
 };
@@ -27,7 +27,7 @@ export default function DataDeletion() {
 
         <section className="space-y-3">
           <p>
-            En <strong>WhatsApp Agent Miclinica</strong>, operado por{" "}
+            En <strong>EstateAI</strong>, operado por{" "}
             <strong>Josep Ferrer</strong>, respetamos tu derecho a controlar tus datos
             personales. Esta página describe cómo puedes solicitar la eliminación de todos los
             datos personales que hayamos recopilado sobre ti a través del asistente virtual de
@@ -183,7 +183,7 @@ export default function DataDeletion() {
       </article>
 
       <footer className="mt-16 border-t border-neutral-800 pt-6 text-xs text-neutral-500">
-        © 2026 Josep Ferrer — WhatsApp Agent Miclinica. Todos los derechos reservados.
+        © 2026 Josep Ferrer — EstateAI. Todos los derechos reservados.
       </footer>
     </main>
   );

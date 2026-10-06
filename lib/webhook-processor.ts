@@ -255,8 +255,27 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           voiceStatus = "unavailable";
           if (plan.audio && speechEnabled()) {
             try {
+              // Límite de coste: el abanico de idiomas (19 transcripciones) como mucho
+              // 3 veces al día por conversación y 100 por agencia.
+              const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+              const [{ count: convFanouts }, { count: orgFanouts }] = await Promise.all([
+                admin
+                  .from("messages")
+                  .select("id", { count: "exact", head: true })
+                  .eq("conversation_id", conv.id)
+                  .eq("raw->>stt_fanout", "true")
+                  .gte("created_at", since),
+                admin
+                  .from("messages")
+                  .select("id", { count: "exact", head: true })
+                  .eq("organization_id", organization_id)
+                  .eq("raw->>stt_fanout", "true")
+                  .gte("created_at", since),
+              ]);
               const bytes = await downloadWhatsAppMedia(m.audio!.id, accessToken);
-              const tr = await transcribeVoiceNote(bytes, lead?.language);
+              const tr = await transcribeVoiceNote(bytes, lead?.language, {
+                allowFanout: (convFanouts ?? 0) < 3 && (orgFanouts ?? 0) < 100,
+              });
               if (tr) {
                 incomingText = tr.text;
                 voiceLanguage = tr.language;
@@ -264,7 +283,10 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
                 // El panel muestra la transcripción en la conversación.
                 await admin
                   .from("messages")
-                  .update({ content: `🎤 ${tr.text}` })
+                  .update({
+                    content: `🎤 ${tr.text}`,
+                    ...(tr.fannedOut ? { raw: { ...(m as unknown as Record<string, unknown>), stt_fanout: true } as Json } : {}),
+                  })
                   .eq("wa_message_id", m.id)
                   .eq("organization_id", organization_id);
               }

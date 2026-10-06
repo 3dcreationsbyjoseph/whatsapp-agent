@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Condiciones de uso — WhatsApp Agent Miclinica",
+  title: "Condiciones de uso — EstateAI",
   description:
     "Condiciones de uso del asistente virtual de WhatsApp para gestión de citas dentales.",
 };
@@ -25,7 +25,7 @@ export default function TermsOfService() {
 
         <section className="space-y-3">
           <p>
-            Bienvenido/a a <strong>WhatsApp Agent Miclinica</strong> (en adelante, &quot;el
+            Bienvenido/a a <strong>EstateAI</strong> (en adelante, &quot;el
             Servicio&quot;), operado por <strong>Josep Ferrer</strong> (en adelante,
             &quot;nosotros&quot;, &quot;nuestro&quot;). Estas Condiciones de uso regulan el
             acceso y utilización del Servicio, incluyendo el sitio web{" "}
@@ -41,7 +41,7 @@ export default function TermsOfService() {
         <section className="space-y-3">
           <h2 className="text-2xl font-semibold">1. Descripción del Servicio</h2>
           <p>
-            WhatsApp Agent Miclinica es un asistente virtual conversacional que permite a los
+            EstateAI es un asistente virtual conversacional que permite a los
             pacientes de una clínica dental agendar, consultar, modificar y cancelar citas
             mediante mensajes de WhatsApp, así como acceder a información básica del negocio.
             El Servicio se integra con la agenda de la clínica (Google Calendar) para gestionar
@@ -245,7 +245,7 @@ export default function TermsOfService() {
       </article>
 
       <footer className="mt-16 border-t border-neutral-800 pt-6 text-xs text-neutral-500">
-        © 2026 Josep Ferrer — WhatsApp Agent Miclinica. Todos los derechos reservados.
+        © 2026 Josep Ferrer — EstateAI. Todos los derechos reservados.
       </footer>
     </main>
   );
