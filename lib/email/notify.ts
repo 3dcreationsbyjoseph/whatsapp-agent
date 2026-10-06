@@ -94,15 +94,19 @@ ${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
 const EMAIL_LOG_PREFIX = "[email] ";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_EMAILS_PER_CONVERSATION_PER_DAY = 5;
-const MAX_EMAILS_PER_ORG_PER_DAY = 200;
+const MAX_REQUEST_EMAILS_PER_ORG_PER_DAY = 200;
 const MAX_SUMMARY_LENGTH = 300;
 
 // El resumen de la petición lo redacta la IA a partir de lo que escribe el
 // cliente: sin enlaces, emails ni teléfonos, y con longitud acotada.
 function sanitizeSummary(summary: string): string {
   const clean = summary
-    .replace(/\bhttps?:\/\/\S+|\bwww\.\S+/gi, "")
+    // Ofuscaciones habituales de puntos en dominios: "evil[.]com", "evil(.)com".
+    .replace(/\s*[[({]\s*(?:\.|dot|punto)\s*[\])}]\s*/gi, ".")
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+|\bwww\.\S+/gi, "")
     .replace(/[^\s@]+@[^\s@]+\.[a-z]{2,}/gi, "")
+    // Dominios sueltos ("evil.com/pagar"): los clientes de correo los enlazan solos.
+    .replace(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#]\S*)?/gi, "")
     // Teléfonos con prefijo internacional (no toca precios como "1.500.000 €").
     .replace(/(?:\+|\b00)\d[\d\s().-]{7,}\d/g, "")
     .replace(/\s+/g, " ")
@@ -150,31 +154,6 @@ export async function notifyClientByEmail(params: {
     if (!to) return { sent: false, reason: "El cliente no ha dado su email." };
     if (!gcal) return { sent: false, reason: "Google no está conectado (Integraciones)." };
 
-    // Límite de envíos: el email lo da el propio cliente (sin verificar), así que
-    // sin tope se podría usar el Gmail de la agencia para mandar spam a terceros.
-    const since = new Date(Date.now() - DAY_MS).toISOString();
-    const [{ count: convCount }, { count: orgCount }] = await Promise.all([
-      admin
-        .from("messages")
-        .select("id", { count: "exact", head: true })
-        .eq("conversation_id", conversation_id)
-        .like("content", `${EMAIL_LOG_PREFIX}%`)
-        .gte("created_at", since),
-      admin
-        .from("messages")
-        .select("id", { count: "exact", head: true })
-        .eq("organization_id", organization_id)
-        .like("content", `${EMAIL_LOG_PREFIX}%`)
-        .gte("created_at", since),
-    ]);
-    if ((convCount ?? 0) >= MAX_EMAILS_PER_CONVERSATION_PER_DAY) {
-      return { sent: false, reason: "Límite de emails a este cliente alcanzado por hoy. No prometas más emails; confírmaselo por WhatsApp." };
-    }
-    if ((orgCount ?? 0) >= MAX_EMAILS_PER_ORG_PER_DAY) {
-      console.warn(JSON.stringify({ level: "warn", msg: "org daily email limit reached", organization_id }));
-      return { sent: false, reason: "Límite diario de emails de la agencia alcanzado. Confírmaselo por WhatsApp." };
-    }
-
     const orgName = org?.name ?? "";
     const firstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
     const email: EmailKind =
@@ -196,18 +175,62 @@ export async function notifyClientByEmail(params: {
     ]);
     const html = text === es.text ? es.html : textToHtml(text);
 
-    await sendGmail(gcal, { to, fromName: orgName, subject, text, html });
+    // Límites anti-spam: el email lo da el propio cliente (sin verificar), así que
+    // sin tope se podría usar el Gmail de la agencia para mandar spam a terceros.
+    // Se RESERVA el envío insertando antes su registro (que también queda como
+    // constancia en la conversación) y se cuenta después incluyéndolo: dos envíos
+    // simultáneos no pueden saltarse el límite. Si no se envía, se borra.
+    const { data: logRow, error: logErr } = await admin
+      .from("messages")
+      .insert({
+        conversation_id,
+        organization_id,
+        wa_message_id: null,
+        direction: "outbound",
+        sender: "bot",
+        content: `${EMAIL_LOG_PREFIX}Enviado a ${to}: ${subject}`,
+        raw: { email_kind: email.kind },
+      })
+      .select("id")
+      .single();
+    if (logErr || !logRow) throw new Error(logErr?.message ?? "No se pudo registrar el email");
+    const release = () => admin.from("messages").delete().eq("id", logRow.id);
 
-    // Queda constancia en la conversación (lo ve el equipo y el propio bot).
-    await admin.from("messages").insert({
-      conversation_id,
-      organization_id,
-      wa_message_id: null,
-      direction: "outbound",
-      sender: "bot",
-      content: `${EMAIL_LOG_PREFIX}Enviado a ${to}: ${subject}`,
-      raw: null,
-    });
+    const since = new Date(Date.now() - DAY_MS).toISOString();
+    const [{ count: convCount }, { count: orgRequestCount }] = await Promise.all([
+      admin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversation_id)
+        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .gte("created_at", since),
+      // El tope por agencia solo cuenta los acuses de solicitud (el tipo abusable):
+      // así nadie puede agotarlo y bloquear las confirmaciones de visitas reales.
+      email.kind === "request_received"
+        ? admin
+            .from("messages")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", organization_id)
+            .eq("raw->>email_kind", "request_received")
+            .gte("created_at", since)
+        : Promise.resolve({ count: 0 }),
+    ]);
+    if ((convCount ?? 0) > MAX_EMAILS_PER_CONVERSATION_PER_DAY) {
+      await release();
+      return { sent: false, reason: "Límite de emails a este cliente alcanzado por hoy. No prometas más emails; confírmaselo por WhatsApp." };
+    }
+    if ((orgRequestCount ?? 0) > MAX_REQUEST_EMAILS_PER_ORG_PER_DAY) {
+      await release();
+      console.warn(JSON.stringify({ level: "warn", msg: "org daily request-email limit reached", organization_id }));
+      return { sent: false, reason: "Límite diario de emails de la agencia alcanzado. Confírmaselo por WhatsApp." };
+    }
+
+    try {
+      await sendGmail(gcal, { to, fromName: orgName, subject, text, html });
+    } catch (err) {
+      await release();
+      throw err;
+    }
     return { sent: true, to };
   } catch (err) {
     const message = (err as Error).message ?? "";
