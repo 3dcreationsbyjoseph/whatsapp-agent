@@ -224,6 +224,7 @@ export function buildContactContext(c: {
   reply_language?: string | null;
   client_language?: string | null;
   language_out_of_plan?: boolean;
+  voice_note?: "transcribed" | "unavailable" | null;
 }): string {
   const langName = (code: string) => LANGUAGE_NAMES[code.split("-")[0]] ?? code;
   const languageLines = c.reply_language
@@ -235,7 +236,21 @@ export function buildContactContext(c: {
         "",
       ]
     : [];
-  const lines = [...languageLines, "DATOS DEL CLIENTE:"];
+  const voiceLines =
+    c.voice_note === "transcribed"
+      ? [
+          "NOTA DE VOZ:",
+          "- El último mensaje del cliente es una nota de voz (ya transcrita). Le responderemos con otra nota de voz: escribe frases naturales para leer en voz alta, sin listas largas, viñetas ni emojis. Los enlaces se le enviarán aparte por escrito.",
+          "",
+        ]
+      : c.voice_note === "unavailable"
+        ? [
+            "NOTA DE VOZ:",
+            "- El cliente ha enviado una nota de voz que no puedes escuchar. Pídele con amabilidad, en su idioma, que te lo escriba. No inventes lo que pudo decir.",
+            "",
+          ]
+        : [];
+  const lines = [...languageLines, ...voiceLines, "DATOS DEL CLIENTE:"];
   if (c.full_name && !c.name_from_whatsapp) {
     lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTA el apellido: pídelo)"}`);
   } else if (c.full_name) {

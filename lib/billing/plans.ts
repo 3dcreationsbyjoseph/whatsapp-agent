@@ -17,7 +17,7 @@ export type PlanFeatures = {
   // Códigos ISO permitidos, o "all".
   languages: readonly string[] | "all";
   model: string;
-  // Audios de WhatsApp (fase 2: aún no implementado).
+  // Notas de voz: transcribir las del cliente y responder con voz (Google Cloud).
   audio: boolean;
 };
 
@@ -50,7 +50,7 @@ export const PLANS: Record<PlanId, PlanFeatures> = {
     calendar: true,
     languages: "all",
     model: ANTHROPIC_MODEL_ADVANCED,
-    audio: false,
+    audio: true,
   },
 };
 

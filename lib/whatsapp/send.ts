@@ -108,3 +108,62 @@ export async function sendTypingIndicator(
     // No es crítico: si falla, el cliente simplemente no ve "escribiendo…".
   }
 }
+
+// ---------------------------------------------------------------------------
+// Audio (plan Max): descarga de notas de voz entrantes y envío de notas de voz.
+// ---------------------------------------------------------------------------
+
+// Descarga un archivo multimedia recibido (2 pasos: URL temporal → bytes).
+export async function downloadWhatsAppMedia(mediaId: string, accessToken: string): Promise<Uint8Array> {
+  const auth = { Authorization: `Bearer ${accessToken}` };
+  const meta = (await (await fetch(`${GRAPH_API_BASE}/${mediaId}`, { headers: auth })).json()) as {
+    url?: string;
+    error?: { message?: string };
+  };
+  if (!meta.url) throw new Error(meta.error?.message ?? "No se pudo obtener la URL del audio");
+  const res = await fetch(meta.url, { headers: auth, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`Descarga del audio: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// Sube una nota de voz OGG/Opus y la envía al cliente.
+export async function sendWhatsAppVoice(
+  phoneNumberId: string,
+  accessToken: string,
+  toE164: string,
+  audio: Uint8Array,
+): Promise<SendResult> {
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", "audio/ogg");
+  form.append("file", new Blob([Buffer.from(audio)], { type: "audio/ogg" }), "respuesta.ogg");
+  const up = await fetch(`${GRAPH_API_BASE}/${phoneNumberId}/media`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  const upData = (await up.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+  if (!up.ok || !upData.id) return { ok: false, error: upData.error?.message ?? `Subida de audio HTTP ${up.status}` };
+
+  const send = async (voice: boolean) => {
+    const res = await fetch(`${GRAPH_API_BASE}/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: toE164,
+        type: "audio",
+        // voice:true → se muestra como nota de voz (micrófono), no como archivo.
+        audio: voice ? { id: upData.id, voice: true } : { id: upData.id },
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { messages?: { id: string }[]; error?: { message?: string } };
+    return res.ok
+      ? { ok: true, message_id: data.messages?.[0]?.id }
+      : { ok: false, error: data.error?.message ?? `HTTP ${res.status}` };
+  };
+  const first = await send(true);
+  // Si esta versión de la API no admite el campo "voice", se envía como audio normal.
+  return first.ok ? first : send(false);
+}

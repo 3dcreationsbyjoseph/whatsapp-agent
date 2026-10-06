@@ -3,7 +3,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
-import { sendTypingIndicator, sendWhatsAppText } from "@/lib/whatsapp/send";
+import { downloadWhatsAppMedia, sendTypingIndicator, sendWhatsAppText, sendWhatsAppVoice } from "@/lib/whatsapp/send";
+import { speechEnabled, synthesizeVoiceNote, textForSpeech, transcribeVoiceNote } from "@/lib/speech/google";
 import { detectLanguageLocal } from "@/lib/lang-detect";
 import { allowedLanguage } from "@/lib/billing/plans";
 import { runAgent } from "@/lib/agent/run-agent";
@@ -24,7 +25,12 @@ type MetaMessage = {
   timestamp: string;
   type: string;
   text?: { body: string };
+  // Notas de voz y audios (type "audio").
+  audio?: { id: string; mime_type?: string; voice?: boolean };
 };
+
+// Texto con el que se guarda una nota de voz hasta transcribirla (o si no se puede).
+const VOICE_PLACEHOLDER = "🎤 [nota de voz]";
 
 type MetaChange = {
   field: string;
@@ -68,8 +74,11 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
       const timezone = org?.timezone ?? DEFAULT_TIMEZONE;
 
       for (const m of change.value.messages ?? []) {
-        if (m.type !== "text" || !m.text) continue;
+        const isVoice = m.type === "audio" && !!m.audio?.id;
+        if (!isVoice && (m.type !== "text" || !m.text)) continue;
         const receivedAt = Date.now();
+        // Texto del mensaje (en notas de voz, la transcripción cuando la haya).
+        let incomingText = m.text?.body ?? VOICE_PLACEHOLDER;
 
         // Upsert contact
         const { data: contact } = await admin
@@ -122,7 +131,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           wa_message_id: m.id,
           direction: "inbound",
           sender: "contact",
-          content: m.text.body,
+          content: incomingText,
           raw: m as unknown as Record<string, unknown>,
         });
         if (insErr) {
@@ -238,10 +247,38 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
         // "Escribiendo…" en el móvil del cliente mientras se prepara la respuesta.
         const typing = sendTypingIndicator(wa.phone_number_id, accessToken, m.id);
 
+        // Notas de voz: solo el plan Max las transcribe (Google Speech-to-Text).
+        let voiceStatus: "transcribed" | "unavailable" | null = null;
+        let voiceLanguage: string | null = null;
+        if (isVoice) {
+          voiceStatus = "unavailable";
+          if (plan.audio && speechEnabled()) {
+            try {
+              const bytes = await downloadWhatsAppMedia(m.audio!.id, accessToken);
+              const tr = await transcribeVoiceNote(bytes, lead?.language);
+              if (tr) {
+                incomingText = tr.text;
+                voiceLanguage = tr.language;
+                voiceStatus = "transcribed";
+                // El panel muestra la transcripción en la conversación.
+                await admin
+                  .from("messages")
+                  .update({ content: `🎤 ${tr.text}` })
+                  .eq("wa_message_id", m.id)
+                  .eq("organization_id", organization_id);
+              }
+            } catch (err) {
+              console.warn(
+                JSON.stringify({ level: "warn", msg: "voice note transcription failed", organization_id, wa_message_id: m.id, err: (err as Error).message }),
+              );
+            }
+          }
+        }
+
         // Idioma de la respuesta, decidido en código (sin IA): el del mensaje si se
         // reconoce; si no (p. ej. "ok", "Una villa"), el último conocido del cliente.
         // Si el plan no incluye ese idioma, se responde en inglés.
-        const detected = detectLanguageLocal(m.text.body);
+        const detected = voiceLanguage ?? (voiceStatus === "unavailable" ? null : detectLanguageLocal(incomingText));
         const clientLanguage = detected ?? lead?.language ?? null;
         const replyLanguage = clientLanguage ? allowedLanguage(clientLanguage, plan) : null;
         const languageOutOfPlan = !!clientLanguage && replyLanguage !== clientLanguage;
@@ -286,6 +323,16 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             });
           }
           flushPhotos();
+          // La nota de voz llega al modelo como su transcripción.
+          if (voiceStatus === "transcribed") {
+            for (let i = chat_history.length - 1; i >= 0; i--) {
+              const h = chat_history[i];
+              if (h.role === "user" && (h.content === VOICE_PLACEHOLDER || h.content === `🎤 ${incomingText}`)) {
+                h.content = `(nota de voz) ${incomingText}`;
+                break;
+              }
+            }
+          }
 
           const sentProperties = new Map<string, Prop>();
           for (const f of fichas ?? []) {
@@ -330,6 +377,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               reply_language: replyLanguage,
               client_language: clientLanguage,
               language_out_of_plan: languageOutOfPlan,
+              voice_note: voiceStatus,
             }),
           });
           const latency_ms = Date.now() - start;
@@ -359,8 +407,40 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               )
             : text?.trim() ?? "";
 
-          if (reply) {
-            const send = await sendWhatsAppText(wa.phone_number_id, accessToken, m.from, reply);
+          // Si el cliente habló por nota de voz (y su plan incluye audio), se responde
+          // con otra nota de voz. Los enlaces van además por escrito. Si la voz falla,
+          // se envía el texto como siempre.
+          let sentVoice = false;
+          if (reply && voiceStatus === "transcribed") {
+            try {
+              const spoken = textForSpeech(reply);
+              if (spoken) {
+                const audio = await synthesizeVoiceNote(spoken, replyLanguage);
+                const v = await sendWhatsAppVoice(wa.phone_number_id, accessToken, m.from, audio);
+                if (v.ok) {
+                  sentVoice = true;
+                  await admin.from("messages").insert({
+                    conversation_id: conv.id,
+                    organization_id,
+                    wa_message_id: v.message_id ?? null,
+                    direction: "outbound",
+                    sender: "bot",
+                    content: `🔊 ${reply}`,
+                    raw: null,
+                  });
+                } else {
+                  console.warn(JSON.stringify({ level: "warn", msg: "voice reply send failed", organization_id, err: v.error }));
+                }
+              }
+            } catch (err) {
+              console.warn(JSON.stringify({ level: "warn", msg: "voice reply failed; sending text", organization_id, err: (err as Error).message }));
+            }
+          }
+          const links = reply.match(/https?:\/\/\S+/g) ?? [];
+          const textToSend = sentVoice ? links.join("\n") : reply;
+
+          if (textToSend) {
+            const send = await sendWhatsAppText(wa.phone_number_id, accessToken, m.from, textToSend);
             if (!send.ok) {
               // Meta rechazó el envío (401/token, plantilla requerida fuera de la ventana, etc.).
               // No guardamos el mensaje como si hubiera llegado — logueamos y salimos.
@@ -382,9 +462,11 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               wa_message_id: send.message_id ?? null,
               direction: "outbound",
               sender: "bot",
-              content: reply,
+              content: textToSend,
               raw: null,
             });
+          }
+          if (reply) {
             await admin
               .from("conversations")
               .update({ last_message_at: new Date().toISOString() })
@@ -403,6 +485,8 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               total_ms: Date.now() - receivedAt,
               reply_language: replyLanguage,
               replied: reply.length > 0,
+              voice: voiceStatus,
+              voice_reply: sentVoice,
             }),
           );
         } catch (err) {
