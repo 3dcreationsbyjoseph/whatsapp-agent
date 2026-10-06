@@ -50,7 +50,10 @@ export function makeRescheduleAppointmentTool(ctx: {
   contact_id: string;
   conversation_id: string;
   contact_phone: string;
+  // Solo Google Calendar (null si el plan no lo incluye o no está conectado).
   gcal: GCalConfig | null;
+  // Conexión de Google para enviar emails con Gmail (todos los planes).
+  mail: GCalConfig | null;
   timezone: string;
   services: ServiceType[];
 }) {
@@ -180,7 +183,7 @@ export function makeRescheduleAppointmentTool(ctx: {
           organization_id: ctx.organization_id,
           contact_id: ctx.contact_id,
           conversation_id: ctx.conversation_id,
-          gcal: ctx.gcal,
+          gcal: ctx.mail,
           email: {
             kind: "visit_rescheduled",
             previous: formatInTz(oldStartMs, ctx.timezone, "long"),

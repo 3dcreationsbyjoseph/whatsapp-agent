@@ -6,6 +6,7 @@ import RealtimeRefresh from "../_components/realtime-refresh";
 import { deleteContact } from "./actions";
 import { cleanName, displayPhone, readMetadata } from "@/lib/contact-info";
 import { formatInTz } from "@/lib/format-date";
+import { getOrgBilling } from "@/lib/billing/access";
 
 type Lead = {
   budget_min_eur: number | null;
@@ -95,13 +96,36 @@ export default async function ClientesPage({ searchParams }: { searchParams: Pro
     );
   }
 
-  const { data } = await query.returns<ContactRow[]>();
+  const [{ data }, billing, { count: totalContacts }] = await Promise.all([
+    query.returns<ContactRow[]>(),
+    getOrgBilling(profile.organization_id),
+    supabase
+      .from("contacts")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", profile.organization_id),
+  ]);
   const contacts = data ?? [];
   const now = Date.now();
+  const maxContacts = billing.plan.maxContacts;
+  const total = totalContacts ?? 0;
 
   return (
     <div className="max-w-5xl space-y-6">
       <RealtimeRefresh channel="clientes-list" />
+      {maxContacts != null ? (
+        total > maxContacts ? (
+          <div className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
+            Tienes {total} clientes y tu plan {billing.plan.name} incluye {maxContacts}. El asistente solo responde a
+            los {maxContacts} clientes más antiguos: los más recientes no reciben respuesta (sus mensajes sí se guardan).
+            Borra clientes que ya no necesites o{" "}
+            <Link href="/facturacion" className="underline">pasa a Pro</Link> para tener clientes ilimitados.
+          </div>
+        ) : (
+          <p className="text-sm text-neutral-500">
+            {total} de {maxContacts} clientes incluidos en tu plan {billing.plan.name}.
+          </p>
+        )
+      ) : null}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Clientes</h1>

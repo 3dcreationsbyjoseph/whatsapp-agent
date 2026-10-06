@@ -11,6 +11,11 @@ export const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}` 
 // Alternativas: "claude-sonnet-5" (mejor razonamiento/multi-idioma), "claude-sonnet-4-6".
 export const ANTHROPIC_MODEL = "claude-haiku-4-5" as const;
 
+// Modelo del plan Max. No admite temperature (el proveedor la ignora) y razona
+// por defecto; su profundidad se controla con effort.
+export const ANTHROPIC_MODEL_ADVANCED = "claude-sonnet-5-5" as const;
+export const ADVANCED_MODEL_EFFORT = "medium" as const;
+
 export const AGENT_MAX_STEPS = 12 as const;
 export const AGENT_TEMPERATURE = 0.3 as const;
 

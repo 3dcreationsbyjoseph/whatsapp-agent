@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
 import { clientLanguageSample, translateForClient } from "../translate";
+import type { PlanFeatures } from "@/lib/billing/plans";
 
 export function makeSendPropertyVideoTool(ctx: {
   organization_id: string;
@@ -15,6 +16,7 @@ export function makeSendPropertyVideoTool(ctx: {
   conversation_id: string;
   phone_number_id: string;
   access_token: string;
+  plan: PlanFeatures;
 }) {
   return tool({
     description:
@@ -82,7 +84,7 @@ export function makeSendPropertyVideoTool(ctx: {
         for (const { label, url } of toSend) {
           try {
             // Se traduce solo la primera línea; la URL va aparte para que no se toque.
-            const caption = await translateForClient(`🎥 ${label} de ${p.title}:`, target);
+            const caption = await translateForClient(`🎥 ${label} de ${p.title}:`, target, ctx.plan);
             const body = `${caption}\n${url}`;
             const res = await sendWhatsAppText(
               ctx.phone_number_id,

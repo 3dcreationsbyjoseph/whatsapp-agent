@@ -5,6 +5,7 @@
 import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { SubscriptionStatus } from "@/lib/database.types";
+import { planFromStripePrice, type PlanId } from "./plans";
 
 const KNOWN_STATUSES: readonly SubscriptionStatus[] = [
   "trialing",
@@ -46,10 +47,15 @@ export async function syncSubscription(sub: Stripe.Subscription): Promise<{ orga
   const periodEnds = sub.items.data.map((i) => i.current_period_end).filter((n): n is number => !!n);
   const periodEnd = periodEnds.length ? Math.min(...periodEnds) : null;
 
+  // Plan según el precio contratado (si hay varios items, el primero reconocido).
+  const plan =
+    sub.items.data.map((i) => planFromStripePrice(i.price?.id)).find((p): p is PlanId => p != null) ?? null;
+
   const admin = createAdminClient();
   const row = {
     organization_id,
     status: toStatus(sub.status),
+    ...(plan ? { plan } : {}),
     stripe_customer_id: customerId(sub.customer),
     stripe_subscription_id: sub.id,
     current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,

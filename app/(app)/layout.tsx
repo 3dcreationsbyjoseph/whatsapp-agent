@@ -73,6 +73,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <div className="mt-1 text-base font-semibold text-white truncate">
             {orgName ?? "—"}
           </div>
+          {billing ? (
+            <Link href="/facturacion" className="mt-1 inline-block text-xs text-neutral-500 hover:text-neutral-300">
+              Plan {billing.subscribedPlan ? billing.plan.name : `${billing.plan.name} (prueba)`}
+            </Link>
+          ) : null}
         </div>
         <nav className="flex-1 space-y-0.5">
           {links.map(({ href, label, icon: Icon, badge }) => (

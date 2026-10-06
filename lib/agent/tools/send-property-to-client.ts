@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText, sendWhatsAppImage } from "@/lib/whatsapp/send";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
 import { clientLanguageSample, translateForClient } from "../translate";
+import type { PlanFeatures } from "@/lib/billing/plans";
 
 // La ficha empieza por "🏡 *Título*" y, si hay referencia, la línea siguiente es
 // "Ref. X". El procesador lo usa para saber qué fichas se enviaron ya.
@@ -31,6 +32,7 @@ export function makeSendPropertyToClientTool(ctx: {
   conversation_id: string;
   phone_number_id: string;
   access_token: string;
+  plan: PlanFeatures;
 }) {
   return tool({
     description:
@@ -99,6 +101,7 @@ export function makeSendPropertyToClientTool(ctx: {
           caption_language
             ? { language: caption_language }
             : { sample: await clientLanguageSample(ctx.conversation_id) },
+          ctx.plan,
         );
 
         // Envía primero el texto.

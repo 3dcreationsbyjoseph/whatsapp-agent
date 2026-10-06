@@ -49,8 +49,8 @@ export type Database = {
         Relationships: [];
       };
       org_subscriptions: {
-        Row: { organization_id: string; status: SubscriptionStatus; trial_ends_at: string; stripe_customer_id: string | null; stripe_subscription_id: string | null; current_period_end: string | null; cancel_at_period_end: boolean; updated_at: string };
-        Insert: { organization_id: string; status?: SubscriptionStatus; trial_ends_at?: string; stripe_customer_id?: string | null; stripe_subscription_id?: string | null; current_period_end?: string | null; cancel_at_period_end?: boolean; updated_at?: string };
+        Row: { organization_id: string; status: SubscriptionStatus; plan: "basic" | "pro" | "max" | null; trial_ends_at: string; stripe_customer_id: string | null; stripe_subscription_id: string | null; current_period_end: string | null; cancel_at_period_end: boolean; updated_at: string };
+        Insert: { organization_id: string; status?: SubscriptionStatus; plan?: "basic" | "pro" | "max" | null; trial_ends_at?: string; stripe_customer_id?: string | null; stripe_subscription_id?: string | null; current_period_end?: string | null; cancel_at_period_end?: boolean; updated_at?: string };
         Update: Partial<Database["public"]["Tables"]["org_subscriptions"]["Insert"]>;
         Relationships: [];
       };

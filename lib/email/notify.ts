@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { readMetadata, cleanName } from "@/lib/contact-info";
 import type { GCalConfig } from "@/lib/google/calendar";
 import { sendGmail } from "./gmail";
+import { getOrgBilling } from "@/lib/billing/access";
 import { clientLanguageSample, isSpanishCode, translateForClient } from "@/lib/agent/translate";
 
 export type EmailKind =
@@ -174,9 +175,11 @@ export async function notifyClientByEmail(params: {
       lead?.language && !isSpanishCode(lead.language)
         ? { language: lead.language }
         : { sample: await clientLanguageSample(conversation_id) };
+    // Solo a los idiomas del plan (si no está incluido, inglés).
+    const { plan } = await getOrgBilling(organization_id);
     const [subject, text] = await Promise.all([
-      translateForClient(es.subject, target),
-      translateForClient(es.text, target),
+      translateForClient(es.subject, target, plan),
+      translateForClient(es.text, target, plan),
     ]);
     const html = text === es.text ? es.html : textToHtml(text);
 

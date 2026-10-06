@@ -2,6 +2,7 @@
 // inmobiliaria de lujo en la Costa Blanca.
 
 import type { Json } from "@/lib/database.types";
+import { LANGUAGE_NAMES, type PlanFeatures } from "@/lib/billing/plans";
 
 export type AgentConfig = {
   system_prompt: string;
@@ -33,7 +34,13 @@ function textOr(v: Json | undefined, fallback: string): string {
 export function buildSystemPrompt(
   config: AgentConfig,
   organizationName: string,
+  plan?: PlanFeatures,
 ): string {
+  const languages = plan?.languages ?? "all";
+  const languageRule =
+    languages === "all"
+      ? "- Atiendes en CUALQUIER idioma que use el cliente, con fluidez nativa: español, inglés, alemán, francés, italiano, portugués, neerlandés, sueco, noruego, danés, finlandés, islandés, polaco, checo, eslovaco, húngaro, rumano, búlgaro, croata, serbio, esloveno, griego, ruso, ucraniano, lituano, letón, estonio, turco, árabe, hebreo, persa, hindi, urdu, chino, japonés, coreano, tailandés, vietnamita, indonesio, catalán, valenciano, gallego, euskera… La lista es orientativa: si escribe en otro idioma, responde en ese idioma."
+      : `- Atiendes ÚNICAMENTE en estos idiomas: ${languages.map((l) => LANGUAGE_NAMES[l] ?? l).join(", ")}. Si el cliente escribe en otro idioma, respóndele en inglés y dile con amabilidad, una sola vez, que puedes atenderle en ${languages.map((l) => LANGUAGE_NAMES[l] ?? l).join(", ")}. Nunca respondas en un idioma que no esté en esta lista.`;
   const services = Array.isArray(config.services) ? config.services : [];
   const hours =
     typeof config.business_hours === "object" && config.business_hours ? config.business_hours : {};
@@ -67,8 +74,8 @@ export function buildSystemPrompt(
     "- Si el cliente pregunta algo sobre la agencia que NO está aquí, no lo inventes: aplica la regla b) de request_human_handoff.",
     "",
     "IDIOMA (regla absoluta):",
-    "- Atiendes en CUALQUIER idioma que use el cliente, con fluidez nativa: español, inglés, alemán, francés, italiano, portugués, neerlandés, sueco, noruego, danés, finlandés, islandés, polaco, checo, eslovaco, húngaro, rumano, búlgaro, croata, serbio, esloveno, griego, ruso, ucraniano, lituano, letón, estonio, turco, árabe, hebreo, persa, hindi, urdu, chino, japonés, coreano, tailandés, vietnamita, indonesio, catalán, valenciano, gallego, euskera… La lista es orientativa: si escribe en otro idioma, responde en ese idioma.",
-    "- Responde SIEMPRE en el idioma del ÚLTIMO mensaje del cliente. Si cambia de idioma, cambia tú también sin comentarlo.",
+    languageRule,
+    "- Responde SIEMPRE en el idioma del ÚLTIMO mensaje del cliente (si está entre tus idiomas). Si cambia de idioma, cambia tú también sin comentarlo.",
     "- En cuanto sepas su idioma, guárdalo con save_lead(language) usando su código ISO (es, en, de, pt, pl, zh, ar...).",
     "- Pasa ese mismo código en caption_language (send_property_to_client) y en language (send_property_video): la ficha y los textos se traducen solos.",
     "- Los mensajes internos del sistema (resultados de tools, notas) vienen en español; no los copies tal cual: comunícaselo al cliente en su idioma.",

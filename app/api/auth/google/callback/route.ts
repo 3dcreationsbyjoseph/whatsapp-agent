@@ -6,6 +6,7 @@ import { syncPendingAppointments } from "@/lib/google/availability";
 import { DEFAULT_TIMEZONE } from "@/lib/format-date";
 import { encrypt } from "@/lib/crypto";
 import { createClient } from "@/lib/supabase/server";
+import { getOrgBilling } from "@/lib/billing/access";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(new URL("/login", process.env.NEXT_PUBLIC_APP_URL));
 
-  const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single<{ organization_id: string }>();
   if (!profile) {
     return NextResponse.redirect(
       new URL("/integraciones?err=" + encodeURIComponent("Perfil no encontrado"), process.env.NEXT_PUBLIC_APP_URL),
@@ -56,13 +57,13 @@ export async function GET(request: Request) {
       );
     if (error) throw error;
 
-    // Crea en Google las visitas reservadas mientras estaba desconectado.
-    const { data: org } = await supabase
-      .from("organizations")
-      .select("timezone")
-      .eq("id", profile.organization_id)
-      .single<{ timezone: string }>();
-    const { synced } = await syncPendingAppointments(
+    // Crea en Google las visitas reservadas mientras estaba desconectado
+    // (solo si el plan incluye Calendar; en Basic Google se usa para el email).
+    const [{ data: org }, billing] = await Promise.all([
+      supabase.from("organizations").select("timezone").eq("id", profile.organization_id).single<{ timezone: string }>(),
+      getOrgBilling(profile.organization_id),
+    ]);
+    const { synced } = !billing.plan.calendar ? { synced: 0 } : await syncPendingAppointments(
       profile.organization_id,
       {
         organization_id: profile.organization_id,

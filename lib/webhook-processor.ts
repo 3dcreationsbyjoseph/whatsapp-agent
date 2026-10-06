@@ -75,7 +75,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             { organization_id, wa_phone: m.from },
             { onConflict: "organization_id,wa_phone", ignoreDuplicates: false },
           )
-          .select("id, full_name, is_new_patient, metadata")
+          .select("id, full_name, is_new_patient, metadata, created_at")
           .single();
         if (!contact) continue;
         const contactMeta = readMetadata(contact.metadata);
@@ -146,6 +146,31 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             }),
           );
           continue;
+        }
+
+        // Límite de clientes del plan: se atiende a los N clientes más antiguos.
+        // Si la agencia borra clientes, los siguientes vuelven a recibir respuesta.
+        // El mensaje queda guardado igualmente (el equipo lo ve en el panel).
+        const plan = billing.plan;
+        if (plan.maxContacts != null) {
+          const { count: olderContacts } = await admin
+            .from("contacts")
+            .select("id", { count: "exact", head: true })
+            .eq("organization_id", organization_id)
+            .lt("created_at", contact.created_at);
+          if ((olderContacts ?? 0) >= plan.maxContacts) {
+            console.log(
+              JSON.stringify({
+                level: "info",
+                msg: "agent skipped: plan contact limit",
+                organization_id,
+                wa_message_id: m.id,
+                plan: plan.id,
+                max_contacts: plan.maxContacts,
+              }),
+            );
+            continue;
+          }
         }
 
         // Ejecutar agente
@@ -261,6 +286,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             access_token: decrypt(wa.access_token_encrypted),
             agent_config: agentCfg,
             gcal_config: gcal,
+            plan,
             chat_history,
             contact_context: buildContactContext({
               full_name: cleanName(contact.full_name),
@@ -296,7 +322,7 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .map((h) => h.content)
             .join("\n");
           const reply = handedOff
-            ? await translateForClient(agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE, { sample: clientSample })
+            ? await translateForClient(agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE, { sample: clientSample }, plan)
             : text?.trim() ?? "";
 
           if (reply) {

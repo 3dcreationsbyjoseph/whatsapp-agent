@@ -13,6 +13,7 @@ import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { ANTHROPIC_MODEL } from "@/lib/constants";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { allowedLanguage, type PlanFeatures } from "@/lib/billing/plans";
 
 const TIMEOUT_MS = 15_000;
 const LANG_CODE_RE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
@@ -80,9 +81,11 @@ function isSafeTranslation(source: string, out: string): boolean {
 
 // target.language: código ISO (p. ej. "de").
 // target.sample: mensajes del cliente; se detecta su idioma (sin pasarlos al traductor).
+// plan: si el idioma del cliente no está incluido en su plan, se usa inglés.
 export async function translateForClient(
   text: string,
   target: { language?: string | null; sample?: string | null },
+  plan?: PlanFeatures,
 ): Promise<string> {
   if (!text.trim()) return text;
   let language = validLangCode(target.language);
@@ -92,6 +95,7 @@ export async function translateForClient(
     language = await detectLanguage(sample);
   }
   if (!language || isSpanishCode(language)) return text;
+  if (plan) language = allowedLanguage(language, plan);
 
   try {
     const { text: out } = await generateText({

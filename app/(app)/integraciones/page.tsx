@@ -3,6 +3,7 @@ import { saveWhatsAppConfig, testWhatsApp } from "./actions";
 import Link from "next/link";
 import { checkGoogleConnection } from "@/lib/google/calendar";
 import { googleCalendarUrl } from "@/lib/google/links";
+import { getOrgBilling } from "@/lib/billing/access";
 
 export default async function IntegracionesPage({ searchParams }: { searchParams: Promise<{ msg?: string; err?: string }> }) {
   const params = await searchParams;
@@ -12,8 +13,9 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("organization_id").eq("id", user.id).single<{ organization_id: string }>();
   if (!profile) return null;
+  const billing = await getOrgBilling(profile.organization_id);
 
   const [{ data: wa }, { data: gcal }, { data: org }] = await Promise.all([
     supabase
@@ -128,6 +130,13 @@ export default async function IntegracionesPage({ searchParams }: { searchParams
         ) : (
           <div className="text-sm text-neutral-400">Aún no conectado.</div>
         )}
+        {!billing.plan.calendar ? (
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm text-neutral-300">
+            Tu plan {billing.plan.name} no incluye Google Calendar: las visitas se guardan en{" "}
+            <Link href="/visitas" className="underline">Visitas</Link> y la conexión con Google se usa solo para enviar
+            los emails de confirmación. Con Pro o Max se sincronizan también con tu calendario.
+          </div>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           <Link
             href="/api/auth/google/start"

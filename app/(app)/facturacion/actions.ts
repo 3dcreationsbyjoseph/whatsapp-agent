@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/billing/stripe";
+import { isPlanId, stripePriceId } from "@/lib/billing/plans";
 
 // Stripe exige que trial_end esté al menos 48 h en el futuro.
 const MIN_TRIAL_MS = 48 * 60 * 60 * 1000;
@@ -32,13 +33,17 @@ function appUrl() {
 
 const NOT_CONFIGURED = "Stripe aún no está configurado.";
 
+class AlreadySubscribedError extends Error {}
+
 function errorRedirect(message: string): never {
   redirect("/facturacion?err=" + encodeURIComponent(message));
 }
 
-export async function startCheckout() {
+export async function startCheckout(formData: FormData) {
   const { user, organization_id } = await requireOwner();
-  const priceId = process.env.STRIPE_PRICE_ID;
+  const plan = formData.get("plan");
+  if (!isPlanId(plan)) errorRedirect("Elige un plan.");
+  const priceId = stripePriceId(plan);
   if (!priceId || !process.env.STRIPE_SECRET_KEY) errorRedirect(NOT_CONFIGURED);
 
   // redirect() lanza una excepción interna de Next: se llama fuera del try.
@@ -51,11 +56,16 @@ export async function startCheckout() {
     const [{ data: sub }, { data: org }] = await Promise.all([
       admin
         .from("org_subscriptions")
-        .select("stripe_customer_id, trial_ends_at")
+        .select("stripe_customer_id, stripe_subscription_id, status, trial_ends_at")
         .eq("organization_id", organization_id)
         .maybeSingle(),
       admin.from("organizations").select("name").eq("id", organization_id).single(),
     ]);
+
+    // Ya hay una suscripción viva: no se crea otra (cambios de plan por el portal).
+    if (sub?.stripe_subscription_id && !["canceled", "incomplete_expired", "unpaid"].includes(sub.status)) {
+      throw new AlreadySubscribedError();
+    }
 
     // Reutiliza el customer o créalo y guárdalo.
     let customerId = sub?.stripe_customer_id ?? null;
@@ -72,8 +82,9 @@ export async function startCheckout() {
       if (error) throw new Error(error.message);
     }
 
-    // Respeta los días de prueba que le queden, si Stripe lo permite (>48 h).
-    const trialEnd = sub?.trial_ends_at ? new Date(sub.trial_ends_at).getTime() : 0;
+    // Pro y Max respetan los días de prueba que le queden, si Stripe lo permite
+    // (>48 h). Basic no tiene prueba: se cobra desde que se contrata.
+    const trialEnd = plan !== "basic" && sub?.trial_ends_at ? new Date(sub.trial_ends_at).getTime() : 0;
     const trialEndUnix = trialEnd > Date.now() + MIN_TRIAL_MS ? Math.floor(trialEnd / 1000) : undefined;
 
     // Sin payment_method_types: se usan los métodos dinámicos activados en el Dashboard
@@ -83,7 +94,7 @@ export async function startCheckout() {
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: {
-        metadata: { organization_id },
+        metadata: { organization_id, plan },
         ...(trialEndUnix ? { trial_end: trialEndUnix } : {}),
       },
       metadata: { organization_id },
@@ -96,8 +107,12 @@ export async function startCheckout() {
     });
     url = session.url;
   } catch (err) {
-    console.error(JSON.stringify({ level: "error", msg: "stripe checkout failed", organization_id, err: (err as Error).message }));
-    failure = "No se pudo iniciar el pago con Stripe. Inténtalo de nuevo en unos minutos.";
+    if (err instanceof AlreadySubscribedError) {
+      failure = "Ya tienes una suscripción. Para cambiar de plan usa «Cambiar de plan o gestionar facturación».";
+    } else {
+      console.error(JSON.stringify({ level: "error", msg: "stripe checkout failed", organization_id, err: (err as Error).message }));
+      failure = "No se pudo iniciar el pago con Stripe. Inténtalo de nuevo en unos minutos.";
+    }
   }
 
   if (failure) errorRedirect(failure);

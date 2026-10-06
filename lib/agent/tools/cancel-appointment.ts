@@ -10,7 +10,10 @@ export function makeCancelAppointmentTool(ctx: {
   contact_id: string;
   conversation_id: string;
   timezone: string;
+  // Solo Google Calendar (null si el plan no lo incluye o no está conectado).
   gcal: GCalConfig | null;
+  // Conexión de Google para enviar emails con Gmail (todos los planes).
+  mail: GCalConfig | null;
 }) {
   return tool({
     description:
@@ -66,7 +69,7 @@ export function makeCancelAppointmentTool(ctx: {
         organization_id: ctx.organization_id,
         contact_id: ctx.contact_id,
         conversation_id: ctx.conversation_id,
-        gcal: ctx.gcal,
+        gcal: ctx.mail,
         email: { kind: "visit_cancelled", when: formatInTz(appt.starts_at, ctx.timezone, "long"), property: propertyTitle ?? null },
       });
 

@@ -20,7 +20,10 @@ export function makeBookVisitTool(ctx: {
   conversation_id: string;
   contact_id: string;
   contact_phone: string;
+  // Solo Google Calendar (null si el plan no lo incluye o no está conectado).
   gcal: GCalConfig | null;
+  // Conexión de Google para enviar emails con Gmail (todos los planes).
+  mail: GCalConfig | null;
   timezone: string;
   services: ServiceType[];
 }) {
@@ -211,7 +214,7 @@ export function makeBookVisitTool(ctx: {
           organization_id: ctx.organization_id,
           contact_id: ctx.contact_id,
           conversation_id: ctx.conversation_id,
-          gcal: ctx.gcal,
+          gcal: ctx.mail,
           email: {
             kind: "visit_booked",
             when: formatInTz(startMs, ctx.timezone, "long"),
@@ -230,7 +233,11 @@ export function makeBookVisitTool(ctx: {
           visit_type,
           local: formatInTz(startMs, ctx.timezone, "long"),
           booked_at_local: formatInTz(bookedAt, ctx.timezone, "datetime"),
-          google_calendar: googleEventId ? "creado" : "pendiente (se sincroniza al reconectar Google Calendar)",
+          google_calendar: googleEventId
+            ? "creado"
+            : ctx.gcal
+              ? "pendiente (se sincroniza al reconectar Google Calendar)"
+              : "no aplica: la visita queda guardada en la agenda de la agencia",
           note: "La visita está RESERVADA. Confírmasela al cliente con día y hora (`local`) y despídete con cordialidad. No digas que un agente la confirmará.",
         };
       } catch (err) {
