@@ -1,7 +1,7 @@
 // Ejecuta un turno del agente con AI SDK 6 + tools para inmobiliaria de lujo.
 // El plan de la agencia decide el modelo, si hay Google Calendar y los idiomas.
 
-import { generateText, hasToolCall, stepCountIs } from "ai";
+import { generateText, hasToolCall, stepCountIs, type ModelMessage } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import {
   ADVANCED_MODEL_EFFORT,
@@ -162,7 +162,15 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     }),
   };
 
-  const run = (modelId: string) => {
+  const historyMessages: ModelMessage[] = input.chat_history.map((m, i, all) => ({
+    role: m.role,
+    content: m.content,
+    ...(i === all.length - 1
+      ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } } }
+      : {}),
+  }));
+
+  const run = (modelId: string, extra?: { messages?: ModelMessage[]; noTools?: boolean }) => {
     const advanced = modelId !== ANTHROPIC_MODEL;
     return generateText({
       model: anthropic(modelId),
@@ -178,13 +186,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       ],
       // 2º breakpoint al final del historial: en un turno con varias tools, cada paso
       // reutiliza la caché del historial (si el total supera el mínimo del modelo).
-      messages: input.chat_history.map((m, i, all) => ({
-        role: m.role,
-        content: m.content,
-        ...(i === all.length - 1
-          ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" as const } } } }
-          : {}),
-      })),
+      messages: [...historyMessages, ...(extra?.messages ?? [])],
       // El modelo avanzado (Max) no admite temperature y razona por defecto; su
       // profundidad se fija con effort ("medium": buen equilibrio para chat).
       ...(advanced
@@ -193,6 +195,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
       // Tras un handoff no damos más pasos: el mensaje al cliente lo envía el processor.
       stopWhen: [stepCountIs(AGENT_MAX_STEPS), hasToolCall("request_human_handoff")],
       tools,
+      ...(extra?.noTools ? { toolChoice: "none" as const } : {}),
     });
   };
 
@@ -235,6 +238,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
         steps: result.steps?.length ?? 0,
         tool_calls: toolCalls,
         text_length: result.text?.length ?? 0,
+        step_text_lengths: (result.steps ?? []).map((st) => st.text?.length ?? 0),
         // Si ambos son 0/undefined el prefijo no llega al mínimo cacheable del modelo.
         cache_read_tokens: result.totalUsage?.inputTokenDetails?.cacheReadTokens ?? null,
         cache_write_tokens: result.totalUsage?.inputTokenDetails?.cacheWriteTokens ?? null,
@@ -246,5 +250,26 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     );
   }
 
-  return { text: result.text };
+  // Texto final para el cliente. Haiku a menudo escribe el mensaje en el MISMO paso
+  // que llama a una tool (p. ej. save_lead) y deja vacío el último paso: result.text
+  // (solo el último paso) salía vacío y el cliente no recibía nada.
+  const stepTexts = (result.steps ?? []).map((s) => s.text?.trim() ?? "").filter(Boolean);
+  let text = result.text?.trim() || stepTexts[stepTexts.length - 1] || "";
+
+  // Si aun así no hay texto (y no se pasó a una persona), se pide la respuesta una vez
+  // más sin tools, con lo que ya hizo en este turno, para no dejar al cliente sin contestar.
+  const handedOff = (result.steps ?? []).some((s) => (s.toolCalls ?? []).some((c) => c.toolName === "request_human_handoff"));
+  if (!text && !handedOff) {
+    try {
+      const followUp = await run(modelUsed, { messages: result.response.messages, noTools: true });
+      text = followUp.text?.trim() ?? "";
+      console.warn(
+        JSON.stringify({ level: "warn", msg: "empty agent reply; follow-up generated", organization_id: input.organization_id, conversation_id: input.conversation_id, text_length: text.length }),
+      );
+    } catch (err) {
+      console.error(JSON.stringify({ level: "error", msg: "empty-reply follow-up failed", organization_id: input.organization_id, err: (err as Error).message }));
+    }
+  }
+
+  return { text };
 }
