@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText, sendWhatsAppImage } from "@/lib/whatsapp/send";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
+import { clientLanguageSample, translateForClient } from "../translate";
 
 // La ficha empieza por "🏡 *Título*" y, si hay referencia, la línea siguiente es
 // "Ref. X". El procesador lo usa para saber qué fichas se enviaron ya.
@@ -40,8 +41,8 @@ export function makeSendPropertyToClientTool(ctx: {
         .describe("La `ref` que devolvió search_properties (también vale el id o el título)."),
       caption_language: z
         .string()
-        .default("es")
-        .describe("Código ISO del idioma del cliente (es, en, de, nl, fr, sv, no, da...)."),
+        .optional()
+        .describe("Código ISO del idioma en que habla el cliente (es, en, de, nl, fr, pt, pl, zh...). La ficha se traduce a ese idioma; si lo omites se detecta de sus mensajes."),
     }),
     execute: async ({ property, caption_language }) => {
       try {
@@ -92,12 +93,20 @@ export function makeSendPropertyToClientTool(ctx: {
           .filter(Boolean)
           .join("\n");
 
+        // Al idioma del cliente (los datos salen del catálogo; el modelo solo traduce).
+        const ficha = await translateForClient(
+          fichaEs,
+          caption_language
+            ? { language: caption_language }
+            : { sample: await clientLanguageSample(ctx.conversation_id) },
+        );
+
         // Envía primero el texto.
         const textRes = await sendWhatsAppText(
           ctx.phone_number_id,
           ctx.access_token,
           ctx.contact_phone,
-          fichaEs,
+          ficha,
         );
         if (!textRes.ok) return { ok: false, error: `Envío texto: ${textRes.error}` };
 
@@ -108,7 +117,7 @@ export function makeSendPropertyToClientTool(ctx: {
           wa_message_id: textRes.message_id ?? null,
           direction: "outbound",
           sender: "bot",
-          content: fichaEs,
+          content: ficha,
           raw: null,
         });
 
@@ -145,8 +154,6 @@ export function makeSendPropertyToClientTool(ctx: {
           .update({ last_message_at: new Date().toISOString() })
           .eq("id", ctx.conversation_id);
 
-        // NB: caption_language se pasa al modelo como pista futura; hoy la ficha
-        // sigue en ES/UTF-8 con emojis universales, funciona bien multi-idioma.
         const remaining = Math.max(0, photos.length - sent);
         return {
           ok: true,
@@ -164,7 +171,6 @@ export function makeSendPropertyToClientTool(ctx: {
               : "") +
             (p.video_url ? "La propiedad TIENE vídeo — si el cliente lo pide usa send_property_video. " : "") +
             "Después pregunta si desea agendar visita presencial o llamada informativa.",
-          language_hint: caption_language,
         };
       } catch (err) {
         return {

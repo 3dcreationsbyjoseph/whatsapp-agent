@@ -8,6 +8,7 @@ import { runAgent } from "@/lib/agent/run-agent";
 import { buildContactContext, type LeadSummary } from "@/lib/agent/system-prompt";
 import { FICHA_PREFIX, parseFicha } from "@/lib/agent/tools/send-property-to-client";
 import { visitLabel } from "@/lib/agent/tools/list-upcoming-appointments";
+import { translateForClient } from "@/lib/agent/translate";
 import { cleanName, hasFullName, isRealName, readMetadata } from "@/lib/contact-info";
 import { DEFAULT_TIMEZONE, formatInTz } from "@/lib/format-date";
 import type { Json } from "@/lib/database.types";
@@ -287,8 +288,15 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
           // Si hubo handoff en este turno se envía siempre el mensaje configurado
           // en Personalización (no el texto libre del modelo).
           const handedOff = convAfter ? !convAfter.bot_active : false;
+          // El mensaje de handoff está escrito en Personalización (normalmente en
+          // español): se traduce al idioma de los últimos mensajes del cliente.
+          const clientSample = chat_history
+            .filter((h) => h.role === "user")
+            .slice(-3)
+            .map((h) => h.content)
+            .join("\n");
           const reply = handedOff
-            ? agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE
+            ? await translateForClient(agentCfg.handoff_message?.trim() || DEFAULT_HANDOFF_MESSAGE, { sample: clientSample })
             : text?.trim() ?? "";
 
           if (reply) {

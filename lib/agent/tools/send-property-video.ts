@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
+import { clientLanguageSample, translateForClient } from "../translate";
 
 export function makeSendPropertyVideoTool(ctx: {
   organization_id: string;
@@ -27,8 +28,12 @@ export function makeSendPropertyVideoTool(ctx: {
         .enum(["video", "tour", "auto"])
         .default("auto")
         .describe("'auto' envía primero el vídeo si existe, si no el tour."),
+      language: z
+        .string()
+        .optional()
+        .describe("Código ISO del idioma en que habla el cliente; el texto que acompaña al enlace se traduce. Si lo omites se detecta de sus mensajes."),
     }),
-    execute: async ({ property_id, prefer }) => {
+    execute: async ({ property_id, prefer, language }) => {
       const admin = createAdminClient();
       try {
         const resolvedId = await resolveCurrentPropertyId({
@@ -73,9 +78,12 @@ export function makeSendPropertyVideoTool(ctx: {
 
         const errors: string[] = [];
         let sent = 0;
+        const target = language ? { language } : { sample: await clientLanguageSample(ctx.conversation_id) };
         for (const { label, url } of toSend) {
           try {
-            const body = `🎥 ${label} de ${p.title}:\n${url}`;
+            // Se traduce solo la primera línea; la URL va aparte para que no se toque.
+            const caption = await translateForClient(`🎥 ${label} de ${p.title}:`, target);
+            const body = `${caption}\n${url}`;
             const res = await sendWhatsAppText(
               ctx.phone_number_id,
               ctx.access_token,

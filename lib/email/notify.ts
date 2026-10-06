@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { readMetadata, cleanName } from "@/lib/contact-info";
 import type { GCalConfig } from "@/lib/google/calendar";
 import { sendGmail } from "./gmail";
+import { clientLanguageSample, isSpanishCode, translateForClient } from "@/lib/agent/translate";
 
 export type EmailKind =
   | { kind: "visit_booked"; when: string; visit: string; property?: string | null; location?: string | null }
@@ -88,6 +89,15 @@ ${lines.map((l) => `<p style="margin:4px 0">${esc(l)}</p>`).join("\n")}
   return { subject, text, html };
 }
 
+// HTML del email a partir del texto ya traducido (párrafos separados por línea en blanco).
+function textToHtml(text: string): string {
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => `<p style="margin:8px 0">${esc(p.trim()).replace(/\n/g, "<br>")}</p>`)
+    .join("\n");
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#111">\n${paragraphs}\n</div>`;
+}
+
 export async function notifyClientByEmail(params: {
   organization_id: string;
   contact_id: string;
@@ -118,10 +128,22 @@ export async function notifyClientByEmail(params: {
     if (!to) return { sent: false, reason: "El cliente no ha dado su email." };
     if (!gcal) return { sent: false, reason: "Google no está conectado (Integraciones)." };
 
-    const lang: Lang = !lead?.language || lead.language.toLowerCase().startsWith("es") ? "es" : "en";
     const orgName = org?.name ?? "";
     const firstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
-    const { subject, text, html } = template(params.email, lang, firstName, orgName);
+    const es = template(params.email, "es", firstName, orgName);
+
+    // Se escribe en español y se traduce al idioma de los mensajes del cliente
+    // (leads.language vale 'es' por defecto aunque el cliente escriba en otro idioma).
+    // Si el idioma ya está guardado y no es español, se usa directamente.
+    const target =
+      lead?.language && !isSpanishCode(lead.language)
+        ? { language: lead.language }
+        : { sample: await clientLanguageSample(conversation_id) };
+    const [subject, text] = await Promise.all([
+      translateForClient(es.subject, target),
+      translateForClient(es.text, target),
+    ]);
+    const html = text === es.text ? es.html : textToHtml(text);
 
     await sendGmail(gcal, { to, fromName: orgName, subject, text, html });
 
