@@ -370,7 +370,9 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             for (let i = chat_history.length - 1; i >= 0; i--) {
               const h = chat_history[i];
               if (h.role === "user" && (h.content === VOICE_PLACEHOLDER || h.content === `🎤 ${incomingText}`)) {
-                h.content = `(nota de voz) ${incomingText}`;
+                // Transcripción automática: los nombres de lugares pueden salir mal
+                // ("Mairead" por "Moraira"); el modelo los interpreta por contexto.
+                h.content = `(nota de voz, transcripción automática: interpreta por contexto nombres de lugares mal transcritos) ${incomingText}`;
                 break;
               }
             }

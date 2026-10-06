@@ -48,34 +48,32 @@ function opusSampleRate(audio: Uint8Array): number {
   return 16000;
 }
 
+type SttResult = { alternatives?: Array<{ transcript?: string; confidence?: number }>; languageCode?: string };
 type SttResponse = {
-  results?: Array<{ alternatives?: Array<{ transcript?: string }>; languageCode?: string }>;
+  results?: SttResult[];
   error?: { message?: string };
   name?: string;
   done?: boolean;
-  response?: { results?: SttResponse["results"] };
+  response?: { results?: SttResult[] };
 };
 
-// Transcribe una nota de voz OGG/Opus. languageHint: idioma conocido del cliente;
-// se añaden alternativas para que reconozca también otros idiomas habituales.
-export async function transcribeVoiceNote(
-  audio: Uint8Array,
-  languageHint?: string | null,
-): Promise<{ text: string; language: string | null } | null> {
-  const primary = sttLocale(languageHint);
-  const alternatives = ["es-ES", "en-GB", "de-DE", "fr-FR"].filter((l) => l !== primary).slice(0, 3);
+type Transcript = { text: string; language: string | null; confidence: number };
+
+// Reconoce la nota en UN idioma concreto. (Las "alternativeLanguageCodes" de la
+// API no funcionan bien: con español como idioma principal, un audio en inglés
+// devolvía vacío. Por eso se prueba idioma a idioma.)
+async function recognizeIn(audio: Uint8Array, sampleRate: number, locale: string): Promise<Transcript | null> {
   const body = {
     config: {
       encoding: "OGG_OPUS",
-      sampleRateHertz: opusSampleRate(audio),
-      languageCode: primary,
-      alternativeLanguageCodes: alternatives,
+      sampleRateHertz: sampleRate,
+      languageCode: locale,
       enableAutomaticPunctuation: true,
-      model: "latest_long",
+      // Vocabulario del sector y de la zona: mejora mucho los nombres de pueblos.
+      speechContexts: [{ phrases: SPEECH_PHRASES, boost: 5 }],
     },
     audio: { content: Buffer.from(audio).toString("base64") },
   };
-
   const post = async (path: string) =>
     (await (
       await fetch(`${STT_URL}/${path}?key=${apiKey()}`, {
@@ -91,6 +89,7 @@ export async function transcribeVoiceNote(
   if (data.error && /too long|longrunning|duration/i.test(data.error.message ?? "")) {
     const op = await post("speech:longrunningrecognize");
     if (!op.name) throw new Error(op.error?.message ?? "No se pudo iniciar la transcripción larga");
+    data = { results: [] };
     for (let i = 0; i < 25; i++) {
       await new Promise((r) => setTimeout(r, 2000));
       const st = (await (await fetch(`${STT_URL}/operations/${op.name}?key=${apiKey()}`)).json()) as SttResponse;
@@ -102,15 +101,46 @@ export async function transcribeVoiceNote(
   }
   if (data.error) throw new Error(data.error.message ?? "Error de Speech-to-Text");
 
-  const results = data.results ?? [];
-  const text = results
-    .map((r) => r.alternatives?.[0]?.transcript?.trim() ?? "")
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  if (!text) return null;
-  const lang = results.find((r) => r.languageCode)?.languageCode ?? null;
-  return { text, language: lang ? lang.toLowerCase().split("-")[0] : null };
+  const results = (data.results ?? []).filter((r) => r.alternatives?.[0]?.transcript?.trim());
+  if (results.length === 0) return null;
+  const text = results.map((r) => r.alternatives![0].transcript!.trim()).join(" ").trim();
+  const confs = results.map((r) => r.alternatives![0].confidence).filter((c): c is number => typeof c === "number");
+  const confidence = confs.length ? confs.reduce((x, y) => x + y, 0) / confs.length : 0.5;
+  return { text, language: locale.toLowerCase().split("-")[0].replace("cmn", "zh").replace("nb", "no"), confidence };
+}
+
+const SPEECH_PHRASES = [
+  "villa", "chalet", "ático", "penthouse", "apartamento", "apartment", "piscina", "pool", "vistas al mar", "sea view",
+  "Moraira", "Jávea", "Xàbia", "Javea", "Calpe", "Calp", "Altea", "Denia", "Dénia", "Benissa", "Teulada",
+  "Benitachell", "Cumbre del Sol", "Costa Blanca", "Alicante", "Valencia",
+  "dormitorios", "bedrooms", "baños", "bathrooms", "visita", "viewing", "presupuesto", "budget", "millones", "million",
+];
+
+// Idiomas que se prueban si el conocido no da un resultado claro.
+const FALLBACK_LANGS = ["es", "en", "de", "fr"];
+const CONFIDENT = 0.75;
+
+// Transcribe una nota de voz OGG/Opus. languageHint: idioma conocido del cliente.
+// 1) Se prueba ese idioma (1 llamada, lo habitual). 2) Si sale vacío o con poca
+// confianza, se prueban en paralelo los idiomas más comunes y se queda el más claro.
+export async function transcribeVoiceNote(
+  audio: Uint8Array,
+  languageHint?: string | null,
+): Promise<{ text: string; language: string | null } | null> {
+  const rate = opusSampleRate(audio);
+  const hint = (languageHint ?? "es").toLowerCase().split("-")[0];
+
+  const first = await recognizeIn(audio, rate, sttLocale(hint));
+  if (first && first.confidence >= CONFIDENT) return { text: first.text, language: first.language };
+
+  const others = FALLBACK_LANGS.filter((l) => l !== hint).slice(0, 3);
+  const settled = await Promise.allSettled(others.map((l) => recognizeIn(audio, rate, sttLocale(l))));
+  const candidates = [first, ...settled.map((r) => (r.status === "fulfilled" ? r.value : null))].filter(
+    (c): c is Transcript => !!c,
+  );
+  if (candidates.length === 0) return null;
+  const best = candidates.sort((x, y) => y.confidence - x.confidence)[0];
+  return { text: best.text, language: best.language };
 }
 
 // Limpia el texto para leerlo en voz alta: sin asteriscos, emojis ni enlaces.
