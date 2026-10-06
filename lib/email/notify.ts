@@ -95,6 +95,7 @@ const EMAIL_LOG_PREFIX = "[email] ";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_EMAILS_PER_CONVERSATION_PER_DAY = 5;
 const MAX_REQUEST_EMAILS_PER_ORG_PER_DAY = 200;
+const MAX_EMAILS_PER_ORG_PER_DAY = 500;
 const MAX_SUMMARY_LENGTH = 300;
 
 // El resumen de la petición lo redacta la IA a partir de lo que escribe el
@@ -155,7 +156,9 @@ export async function notifyClientByEmail(params: {
     if (!gcal) return { sent: false, reason: "Google no está conectado (Integraciones)." };
 
     const orgName = org?.name ?? "";
-    const firstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
+    // El nombre lo da el cliente: si parece un enlace/dominio/email, no se usa en el saludo.
+    const rawFirstName = cleanName(contact?.full_name)?.split(" ")[0] ?? null;
+    const firstName = rawFirstName && !/[./@:\\]/.test(rawFirstName) ? rawFirstName : null;
     const email: EmailKind =
       params.email.kind === "request_received"
         ? { kind: "request_received", summary: sanitizeSummary(params.email.summary) }
@@ -197,11 +200,19 @@ export async function notifyClientByEmail(params: {
     const release = () => admin.from("messages").delete().eq("id", logRow.id);
 
     const since = new Date(Date.now() - DAY_MS).toISOString();
-    const [{ count: convCount }, { count: orgRequestCount }] = await Promise.all([
+    const [{ count: convCount }, { count: orgTotalCount }, { count: orgRequestCount }] = await Promise.all([
       admin
         .from("messages")
         .select("id", { count: "exact", head: true })
         .eq("conversation_id", conversation_id)
+        .like("content", `${EMAIL_LOG_PREFIX}%`)
+        .gte("created_at", since),
+      // Tope general (todos los tipos), más alto: acota el abuso con muchos números
+      // reservando/cancelando en bucle, sin bloquear el uso normal.
+      admin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organization_id)
         .like("content", `${EMAIL_LOG_PREFIX}%`)
         .gte("created_at", since),
       // El tope por agencia solo cuenta los acuses de solicitud (el tipo abusable):
@@ -219,7 +230,7 @@ export async function notifyClientByEmail(params: {
       await release();
       return { sent: false, reason: "Límite de emails a este cliente alcanzado por hoy. No prometas más emails; confírmaselo por WhatsApp." };
     }
-    if ((orgRequestCount ?? 0) > MAX_REQUEST_EMAILS_PER_ORG_PER_DAY) {
+    if ((orgTotalCount ?? 0) > MAX_EMAILS_PER_ORG_PER_DAY || (orgRequestCount ?? 0) > MAX_REQUEST_EMAILS_PER_ORG_PER_DAY) {
       await release();
       console.warn(JSON.stringify({ level: "warn", msg: "org daily request-email limit reached", organization_id }));
       return { sent: false, reason: "Límite diario de emails de la agencia alcanzado. Confírmaselo por WhatsApp." };
