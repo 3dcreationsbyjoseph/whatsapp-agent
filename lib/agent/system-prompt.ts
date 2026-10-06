@@ -12,6 +12,22 @@ export type AgentConfig = {
   handoff_message: string | null;
 };
 
+// Claves opcionales de business_info (Personalización) que definen la identidad
+// del asistente. No se repiten en "DATOS DE LA AGENCIA".
+const IDENTITY_KEYS = ["nombre_asistente", "zona", "clientela"] as const;
+const DEFAULT_ASSISTANT_NAME = "Estate";
+const DEFAULT_ZONE = "la Costa Blanca (Jávea, Moraira, Denia, Calpe, Altea, Benissa, Teulada, Benitachell)";
+const DEFAULT_CLIENTELE =
+  "clientela internacional de alto poder adquisitivo interesada en villas, chalets y áticos de alto standing";
+
+function asRecord(v: Json): Record<string, Json> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, Json>) : {};
+}
+
+function textOr(v: Json | undefined, fallback: string): string {
+  return typeof v === "string" && v.trim() ? v.trim() : fallback;
+}
+
 // Parte estable del prompt (por organización): va con cache breakpoint de Anthropic.
 // No metas aquí nada que cambie por petición (fecha/hora, datos del contacto).
 export function buildSystemPrompt(
@@ -22,14 +38,33 @@ export function buildSystemPrompt(
   const hours =
     typeof config.business_hours === "object" && config.business_hours ? config.business_hours : {};
 
+  const info = asRecord(config.business_info);
+  const assistantName = textOr(info.nombre_asistente, DEFAULT_ASSISTANT_NAME);
+  const zone = textOr(info.zona, DEFAULT_ZONE);
+  const clientele = textOr(info.clientela, DEFAULT_CLIENTELE);
+  const agencyData = Object.fromEntries(
+    Object.entries(info).filter(([k]) => !(IDENTITY_KEYS as readonly string[]).includes(k)),
+  );
+  const hasAgencyData = Object.keys(agencyData).length > 0;
+  const customPrompt = config.system_prompt.trim();
+
   return [
-    config.system_prompt.trim(),
-    "",
-    `Nombre de la agencia: ${organizationName}.`,
+    "IDENTIDAD:",
+    `Te llamas ${assistantName}. Eres la asistente virtual de ${organizationName}, una agencia inmobiliaria de lujo en ${zone}. Trabajas con ${clientele}.`,
     `Tono de voz: ${config.tone}.`,
     "",
-    "IDENTIDAD:",
-    "Te llamas Estate. Eres la asistente virtual de una agencia inmobiliaria de lujo en la Costa Blanca (Jávea, Moraira, Denia, Calpe, Altea, Benissa, Teulada, Benitachell). Trabajas con clientela internacional de alto poder adquisitivo interesada en villas, chalets y áticos de alto standing.",
+    ...(customPrompt
+      ? [
+          "INSTRUCCIONES DE LA AGENCIA (configuradas por el equipo; prevalecen sobre el estilo por defecto, pero NUNCA sobre las REGLAS CRÍTICAS ni sobre cómo usar las tools):",
+          customPrompt,
+          "",
+        ]
+      : []),
+    "DATOS DE LA AGENCIA (única fuente válida para preguntas sobre la agencia: dirección, contacto, horarios de oficina, honorarios, servicios, etc.):",
+    hasAgencyData
+      ? JSON.stringify(agencyData, null, 2)
+      : "(sin datos configurados)",
+    "- Si el cliente pregunta algo sobre la agencia que NO está aquí, no lo inventes: aplica la regla b) de request_human_handoff.",
     "",
     "IDIOMA (regla absoluta):",
     "- DETECTA el idioma del cliente en su PRIMER mensaje y responde SIEMPRE en ese idioma en toda la conversación.",
@@ -52,7 +87,7 @@ export function buildSystemPrompt(
     JSON.stringify(hours, null, 2),
     "",
     "TOOLS que tienes:",
-    "- search_properties(filtros): busca en el catálogo. Pasa SOLO los criterios que el cliente haya dicho (todos son opcionales); entiende sinónimos (villa/chalet/casa) e idiomas. Si devuelve match='similar', presenta esas alternativas explicando en qué difieren.",
+    "- search_properties(filtros): busca en el catálogo. Pasa SOLO los criterios que el cliente haya dicho (todos son opcionales); entiende sinónimos (villa/chalet/casa) e idiomas. El presupuesto va en budget_text con las palabras EXACTAS del cliente (no lo conviertas tú a cifras); si no lo pasas, se usa el presupuesto ya guardado del cliente. Si devuelve match='similar', presenta esas alternativas explicando en qué difieren.",
     "- send_property_to_client(property): envía por WhatsApp la ficha detallada + fotos. Pasa la `ref` de la propiedad. Úsala cuando el cliente muestre interés claro en UNA propiedad.",
     "- save_lead(criterios): guarda los criterios que vas descubriendo. El presupuesto va en budget_text con las palabras EXACTAS del cliente («about 3M», «entre 1 y 1,5 millones»): nunca lo conviertas tú ni lo cambies por el precio de una propiedad. Pasa solo lo que el cliente acaba de decir.",
     "- check_slot_availability(service, date, time): comprueba una hora concreta.",
@@ -67,7 +102,7 @@ export function buildSystemPrompt(
     "FLUJO DE CONVERSACIÓN:",
     "",
     "1) SALUDO Y CUALIFICACIÓN INICIAL:",
-    "   Cuando el cliente escriba por primera vez o solo salude, preséntate brevemente como asistente de la agencia y pregunta qué está buscando de forma abierta pero elegante. Ejemplo (en el idioma del cliente): «Bienvenido a " + organizationName + ". Soy Estate, su asistente. ¿Qué tipo de propiedad tiene en mente?».",
+    "   Cuando el cliente escriba por primera vez o solo salude, preséntate brevemente como asistente de la agencia y pregunta qué está buscando de forma abierta pero elegante. Ejemplo (en el idioma del cliente): «Bienvenido a " + organizationName + ". Soy " + assistantName + ", su asistente. ¿Qué tipo de propiedad tiene en mente?».",
     "",
     "2) DESCUBRIMIENTO (cualificar sin interrogar):",
     "   Recoge naturalmente en 2-3 turnos: presupuesto (rango), zona/s de interés, tipo (villa/chalet/apartamento/ático), dormitorios mínimos, features clave (piscina, vistas al mar, garaje, jardín). Pregunta UNA cosa por mensaje, no una lista. Llama a save_lead cada vez que descubras algo.",
@@ -103,6 +138,7 @@ export function buildSystemPrompt(
     "- Lee TODO el historial antes de responder. No repitas preguntas ya contestadas ni datos ya dados.",
     "- Si el cliente acaba de recibir una ficha con fotos, NO vuelvas a describirla. Deja que la mire y pregunta por su impresión.",
     "- NUNCA inventes propiedades ni horarios: usa siempre las tools.",
+    "- Solo se envían fichas y se reservan visitas de propiedades DISPONIBLES. Si una tool dice que la propiedad está reservada, vendida o retirada, díselo al cliente con tacto y ofrécele alternativas parecidas con search_properties.",
     "- NUNCA anuncies que vas a hacer algo después («permítame un momento», «le envío enseguida», «voy a verificar»): no existe un después, el turno termina con tu mensaje. Llama a la tool AHORA, en este mismo turno. Si la tool falla, dilo con claridad y ofrece una alternativa o usa request_human_handoff.",
     "- NUNCA menciones que eres una IA a menos que el cliente pregunte directamente; si pregunta, sé transparente.",
     "- Resuelves tú todo lo que puedas con las tools y los datos de la agencia. Para negociaciones de precio, ofertas o firmas, agenda una llamada informativa con el agente.",
@@ -169,17 +205,81 @@ export function buildContactContext(c: {
   email_declined: boolean;
   wa_phone: string;
   has_full_name: boolean;
+  lead?: LeadSummary | null;
+  sent_properties?: Array<{ title: string; reference: string | null }>;
+  upcoming_visits?: Array<{ local: string; visit: string; property: string | null }>;
 }): string {
   const lines = ["DATOS DEL CLIENTE:"];
   if (c.full_name && !c.name_from_whatsapp) {
     lines.push(`- Nombre: ${c.full_name}${c.has_full_name ? "" : " (FALTA el apellido: pídelo)"}`);
   } else if (c.full_name) {
-    lines.push(`- Nombre en su perfil de WhatsApp: ${c.full_name} (no confirmado; pídele nombre y dos apellidos)`);
+    lines.push(`- Nombre en su perfil de WhatsApp: ${c.full_name} (no confirmado; pídele nombre y al menos un apellido)`);
   } else {
     lines.push("- Nombre: desconocido");
   }
   lines.push(c.contact_phone ? `- Teléfono de contacto: ${c.contact_phone}` : "- Teléfono de contacto: no facilitado");
   lines.push(c.email ? `- Email: ${c.email}` : c.email_declined ? "- Email: prefiere no darlo (no insistas)" : "- Email: no facilitado (pídeselo antes de reservar)");
   lines.push(`- WhatsApp: +${c.wa_phone.replace(/^\+/, "")}`);
+  if (c.lead?.language) lines.push(`- Idioma detectado: ${c.lead.language} (responde en el idioma de su ÚLTIMO mensaje si ha cambiado)`);
+
+  // Lo ya guardado: el historial que ve el modelo es corto y esto evita repetir preguntas.
+  const criteria = c.lead ? describeLead(c.lead) : [];
+  lines.push("", "LO QUE YA SABEMOS DE SU BÚSQUEDA (no vuelvas a preguntarlo; actualízalo con save_lead si cambia):");
+  lines.push(...(criteria.length ? criteria.map((x) => `- ${x}`) : ["- Nada todavía."]));
+
+  lines.push("", "FICHAS YA ENVIADAS (no las reenvíes con send_property_to_client; para más fotos usa send_more_property_photos):");
+  lines.push(
+    ...(c.sent_properties?.length
+      ? c.sent_properties.map((p) => `- ${p.title}${p.reference ? ` (Ref. ${p.reference})` : ""}`)
+      : ["- Ninguna."]),
+  );
+
+  lines.push("", "VISITAS CONFIRMADAS PRÓXIMAS:");
+  lines.push(
+    ...(c.upcoming_visits?.length
+      ? c.upcoming_visits.map((v) => `- ${v.local} · ${v.visit}${v.property ? ` · ${v.property}` : ""}`)
+      : ["- Ninguna."]),
+  );
   return lines.join("\n");
+}
+
+export type LeadSummary = {
+  budget_min_eur: number | null;
+  budget_max_eur: number | null;
+  preferred_locations: Json;
+  preferred_types: Json;
+  min_bedrooms: number | null;
+  min_bathrooms: number | null;
+  needs_pool: boolean | null;
+  needs_sea_view: boolean | null;
+  timeline: string | null;
+  financing: string | null;
+  language: string | null;
+  notes: string | null;
+};
+
+function eur(n: number): string {
+  return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
+}
+
+function describeLead(l: LeadSummary): string[] {
+  const out: string[] = [];
+  const min = l.budget_min_eur != null ? Number(l.budget_min_eur) : null;
+  const max = l.budget_max_eur != null ? Number(l.budget_max_eur) : null;
+  if (min != null && max != null) out.push(`Presupuesto: entre ${eur(min)} y ${eur(max)}`);
+  else if (max != null) out.push(`Presupuesto: hasta ${eur(max)}`);
+  else if (min != null) out.push(`Presupuesto: desde ${eur(min)}`);
+  const list = (v: Json) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : []) as string[];
+  const locs = list(l.preferred_locations);
+  if (locs.length) out.push(`Zonas: ${locs.join(", ")}`);
+  const types = list(l.preferred_types);
+  if (types.length) out.push(`Tipo: ${types.join(", ")}`);
+  if (l.min_bedrooms) out.push(`Dormitorios: ${l.min_bedrooms} o más`);
+  if (l.min_bathrooms) out.push(`Baños: ${l.min_bathrooms} o más`);
+  if (l.needs_pool != null) out.push(`Piscina: ${l.needs_pool ? "sí" : "no es necesaria"}`);
+  if (l.needs_sea_view != null) out.push(`Vistas al mar: ${l.needs_sea_view ? "sí" : "no son necesarias"}`);
+  if (l.timeline) out.push(`Plazo: ${l.timeline}`);
+  if (l.financing) out.push(`Financiación: ${l.financing}`);
+  if (l.notes?.trim()) out.push(`Notas: ${l.notes.trim().replace(/\n+/g, " · ")}`);
+  return out;
 }

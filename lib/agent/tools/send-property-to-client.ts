@@ -8,6 +8,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendWhatsAppText, sendWhatsAppImage } from "@/lib/whatsapp/send";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
 
+// La ficha empieza por "🏡 *Título*" y, si hay referencia, la línea siguiente es
+// "Ref. X". El procesador lo usa para saber qué fichas se enviaron ya.
+export const FICHA_PREFIX = "🏡 *";
+
+export function parseFicha(content: string | null | undefined): { title: string; reference: string | null } | null {
+  if (!content?.startsWith(FICHA_PREFIX)) return null;
+  const m = content.match(/^🏡 \*(.+?)\*\n(?:Ref\. ([^\n]+)\n)?/u);
+  return m ? { title: m[1], reference: m[2]?.trim() ?? null } : null;
+}
+
+// Mensaje para el modelo cuando la propiedad ya no está disponible.
+export function unavailableError(title: string, status: string): string {
+  const label = status === "reserved" ? "reservada" : status === "sold" ? "vendida" : "retirada del mercado";
+  return `La propiedad «${title}» está ${label}: no se puede enviar ni visitar. Díselo al cliente con tacto y ofrécele alternativas parecidas con search_properties.`;
+}
+
 export function makeSendPropertyToClientTool(ctx: {
   organization_id: string;
   contact_phone: string;
@@ -51,6 +67,7 @@ export function makeSendPropertyToClientTool(ctx: {
           .eq("organization_id", ctx.organization_id)
           .single();
         if (error || !p) return { ok: false, error: "Propiedad no encontrada." };
+        if (p.status !== "available") return { ok: false, error: unavailableError(p.title, p.status) };
 
         // Texto de la ficha (adaptado al idioma del cliente).
         const feats = Array.isArray(p.features) ? (p.features as string[]) : [];

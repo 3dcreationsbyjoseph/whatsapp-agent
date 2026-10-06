@@ -47,6 +47,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
   const tools = {
     search_properties: makeSearchPropertiesTool({
       organization_id: input.organization_id,
+      contact_id: input.contact_id,
     }),
     send_property_to_client: makeSendPropertyToClientTool({
       organization_id: input.organization_id,
@@ -107,6 +108,7 @@ export async function runAgent(input: AgentInput): Promise<{ text: string }> {
     list_upcoming_appointments: makeListUpcomingAppointmentsTool({
       organization_id: input.organization_id,
       contact_id: input.contact_id,
+      timezone: input.timezone,
     }),
     cancel_appointment: makeCancelAppointmentTool({
       organization_id: input.organization_id,

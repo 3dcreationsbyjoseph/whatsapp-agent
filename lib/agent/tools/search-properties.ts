@@ -2,18 +2,27 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rankProperties, type PropertyRow } from "../property-matching";
+import { parseBudget } from "@/lib/budget";
 
 // Catálogo de una agencia: cabe en memoria. Filtramos en código para poder
 // tolerar sinónimos, tildes y criterios aproximados (ver property-matching.ts).
 const MAX_CATALOG = 500;
 
-export function makeSearchPropertiesTool(ctx: { organization_id: string }) {
+// El presupuesto se interpreta en código (lib/budget.ts), como en save_lead:
+// el modelo convertía mal "about 3M". Sin budget_text se usa el guardado del lead.
+export function makeSearchPropertiesTool(ctx: { organization_id: string; contact_id: string }) {
   return tool({
     description:
-      "Busca propiedades disponibles. TODOS los filtros son opcionales: pasa solo lo que el cliente haya dicho, nunca inventes valores. Entiende sinónimos (villa = chalet = casa = house), tildes y otros idiomas. Dormitorios/baños son mínimos y el precio admite ~10% de margen. Si no hay coincidencias exactas devuelve las más parecidas con match='similar' y sus diferencias. Cada resultado trae `ref`: úsala para referirte a la propiedad y para send_property_to_client / book_visit.",
+      "Busca propiedades disponibles. TODOS los filtros son opcionales: pasa solo lo que el cliente haya dicho, nunca inventes valores. Entiende sinónimos (villa = chalet = casa = house), tildes y otros idiomas. Dormitorios/baños son mínimos y el precio admite ~10% de margen. El presupuesto va en budget_text con las palabras EXACTAS del cliente; si lo omites se usa el presupuesto ya guardado del cliente (la respuesta indica cuál se usó en `budget_used`). Si no hay coincidencias exactas devuelve las más parecidas con match='similar' y sus diferencias. Cada resultado trae `ref`: úsala para referirte a la propiedad y para send_property_to_client / book_visit.",
     inputSchema: z.object({
-      min_price_eur: z.number().nonnegative().nullish(),
-      max_price_eur: z.number().nonnegative().nullish(),
+      budget_text: z
+        .string()
+        .nullish()
+        .describe("Presupuesto con las palabras EXACTAS del cliente, p. ej. 'about 3M', 'entre 1 y 1,5 millones', 'hasta 800k'. No lo conviertas tú a números."),
+      ignore_budget: z
+        .boolean()
+        .nullish()
+        .describe("true solo si el cliente pide expresamente ver opciones sin límite de precio."),
       locations: z.array(z.string()).nullish().describe("Zonas, ej. ['Jávea','Moraira']"),
       property_types: z
         .array(z.string())
@@ -28,6 +37,32 @@ export function makeSearchPropertiesTool(ctx: { organization_id: string }) {
     execute: async (args) => {
       try {
         const admin = createAdminClient();
+
+        let budget: { min: number | null; max: number | null } | null = null;
+        let budgetSource: "client_text" | "saved" | "none" = "none";
+        let budgetWarning: string | null = null;
+        if (!args.ignore_budget) {
+          if (args.budget_text) {
+            budget = parseBudget(args.budget_text);
+            if (budget) budgetSource = "client_text";
+            else budgetWarning = "No se entendió el presupuesto; se buscó sin límite de precio. Pregúntale una cifra aproximada.";
+          } else {
+            const { data: lead } = await admin
+              .from("leads")
+              .select("budget_min_eur, budget_max_eur")
+              .eq("organization_id", ctx.organization_id)
+              .eq("contact_id", ctx.contact_id)
+              .maybeSingle<{ budget_min_eur: number | null; budget_max_eur: number | null }>();
+            if (lead && (lead.budget_min_eur != null || lead.budget_max_eur != null)) {
+              budget = {
+                min: lead.budget_min_eur != null ? Number(lead.budget_min_eur) : null,
+                max: lead.budget_max_eur != null ? Number(lead.budget_max_eur) : null,
+              };
+              budgetSource = "saved";
+            }
+          }
+        }
+
         const { data, error } = await admin
           .from("properties")
           .select(
@@ -40,11 +75,17 @@ export function makeSearchPropertiesTool(ctx: { organization_id: string }) {
 
         // database.types.ts aún no incluye `properties` (placeholder): cast explícito.
         const rows = (data ?? []) as unknown as PropertyRow[];
-        const { match, results } = rankProperties(rows, args, args.limit ?? 3);
+        const { match, results } = rankProperties(
+          rows,
+          { ...args, min_price_eur: budget?.min ?? null, max_price_eur: budget?.max ?? null },
+          args.limit ?? 3,
+        );
 
         return {
           ok: true,
           match,
+          budget_used: budget ? { min_eur: budget.min, max_eur: budget.max, source: budgetSource } : null,
+          ...(budgetWarning ? { budget_warning: budgetWarning } : {}),
           note:
             match === "exact"
               ? "Coinciden con lo que pidió el cliente."

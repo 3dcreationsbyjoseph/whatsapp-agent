@@ -5,9 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decrypt } from "@/lib/crypto";
 import { sendWhatsAppText } from "@/lib/whatsapp/send";
 import { runAgent } from "@/lib/agent/run-agent";
-import { buildContactContext } from "@/lib/agent/system-prompt";
+import { buildContactContext, type LeadSummary } from "@/lib/agent/system-prompt";
+import { FICHA_PREFIX, parseFicha } from "@/lib/agent/tools/send-property-to-client";
+import { visitLabel } from "@/lib/agent/tools/list-upcoming-appointments";
 import { cleanName, hasFullName, isRealName, readMetadata } from "@/lib/contact-info";
-import { DEFAULT_TIMEZONE } from "@/lib/format-date";
+import { DEFAULT_TIMEZONE, formatInTz } from "@/lib/format-date";
 import type { Json } from "@/lib/database.types";
 import { getOrgBilling } from "@/lib/billing/access";
 import { DEFAULT_HANDOFF_MESSAGE } from "@/lib/agent/tools/request-human-handoff";
@@ -201,6 +203,51 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
             .eq("id", organization_id)
             .single();
 
+          // Lo ya sabido del cliente (el historial que ve el modelo es corto):
+          // criterios del lead, fichas enviadas y visitas próximas.
+          type Prop = { title: string; reference: string | null };
+          const [{ data: lead }, { data: fichas }, { data: visits }] = await Promise.all([
+            admin
+              .from("leads")
+              .select(
+                "budget_min_eur, budget_max_eur, preferred_locations, preferred_types, min_bedrooms, min_bathrooms, needs_pool, needs_sea_view, timeline, financing, language, notes",
+              )
+              .eq("organization_id", organization_id)
+              .eq("contact_id", contact.id)
+              .maybeSingle<LeadSummary>(),
+            admin
+              .from("messages")
+              .select("content")
+              .eq("conversation_id", conv.id)
+              .eq("direction", "outbound")
+              .like("content", `${FICHA_PREFIX}%`)
+              .order("created_at", { ascending: true })
+              .limit(50),
+            admin
+              .from("appointments")
+              .select("starts_at, visit_type, property:properties(title, reference)")
+              .eq("organization_id", organization_id)
+              .eq("contact_id", contact.id)
+              .eq("status", "confirmed")
+              .gte("starts_at", new Date().toISOString())
+              .order("starts_at", { ascending: true })
+              .limit(5)
+              .returns<Array<{ starts_at: string; visit_type: string | null; property: Prop | Prop[] | null }>>(),
+          ]);
+          const sentProperties = new Map<string, Prop>();
+          for (const f of fichas ?? []) {
+            const p = parseFicha(f.content);
+            if (p) sentProperties.set(p.reference ?? p.title, p);
+          }
+          const upcomingVisits = (visits ?? []).map((v) => {
+            const p = Array.isArray(v.property) ? v.property[0] : v.property;
+            return {
+              local: formatInTz(v.starts_at, timezone, "long"),
+              visit: visitLabel(v.visit_type),
+              property: p ? (p.reference ? `${p.title} (Ref. ${p.reference})` : p.title) : null,
+            };
+          });
+
           const start = Date.now();
           const { text } = await runAgent({
             organization_id,
@@ -222,6 +269,9 @@ export async function processWebhook(payload: MetaWebhookPayload): Promise<void>
               email_declined: contactMeta.email_declined === true,
               wa_phone: m.from,
               has_full_name: hasFullName(contact.full_name) || contactMeta.name_confirmed === true,
+              lead: lead ?? null,
+              sent_properties: [...sentProperties.values()],
+              upcoming_visits: upcomingVisits,
             }),
           });
           const latency_ms = Date.now() - start;

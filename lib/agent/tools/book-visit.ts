@@ -11,6 +11,7 @@ import { cleanName, hasFullName, readMetadata } from "@/lib/contact-info";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveCurrentPropertyId } from "../resolve-current-property";
+import { unavailableError } from "./send-property-to-client";
 
 type ServiceType = { name: string; duration_minutes: number; description?: string };
 
@@ -72,7 +73,7 @@ export function makeBookVisitTool(ctx: {
         // Carga la propiedad para el título / summary.
         const { data: property } = await admin
           .from("properties")
-          .select("title, reference, location, price_eur, agent_name, agent_phone")
+          .select("title, reference, location, price_eur, agent_name, agent_phone, status")
           .eq("id", property_id)
           .eq("organization_id", ctx.organization_id)
           .single<{
@@ -82,8 +83,10 @@ export function makeBookVisitTool(ctx: {
             price_eur: number;
             agent_name: string | null;
             agent_phone: string | null;
+            status: string;
           }>();
         if (!property) return { ok: false, error: "Propiedad no encontrada." };
+        if (property.status !== "available") return { ok: false, error: unavailableError(property.title, property.status) };
 
         // Sin zona horaria explícita = hora local de la agencia (no UTC del servidor).
         const startMs = parseInTz(starts_at, ctx.timezone);
